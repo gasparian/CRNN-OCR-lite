@@ -4,82 +4,89 @@ import pickle
 import operator 
 from collections import OrderedDict
 
+import cv2
 import numpy as np
 from numpy.random import RandomState
 from PIL import Image, ImageDraw
-import cv2
+from tqdm import tqdm
 
-from keras.models import Model, model_from_json
-from keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, Dense, Input, Lambda, Bidirectional
-from keras.layers.normalization import BatchNormalization
+from keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, Dense, Input, Lambda, Bidirectional, ZeroPadding2D, concatenate, multiply
 #from keras.layers import LSTM, GRU
 from keras.layers import CuDNNLSTM as LSTM
 from keras.layers import CuDNNGRU as GRU
-from keras.models import load_model
+from keras.layers.core import *
+from keras.layers.normalization import BatchNormalization
+from keras.callbacks import Callback
+from keras.models import Model, load_model, model_from_json
 from keras import optimizers
 from keras import backend as K
-from keras.callbacks import Callback
 
-from attention_layer import *
+####################################################################################
+#                                 REFERENCES                                       #
+####################################################################################
 
-###########################################################
-#                       REFERENCES                        #
-###########################################################
-
-# https://github.com/Tony607/keras-image-ocr/blob/master/image-ocr.ipynb
 # https://github.com/meijieru/crnn.pytorch
+# https://github.com/sbillburg/CRNN-with-STN/blob/master/CRNN_with_STN.py
 #
 # attention block:
 # https://github.com/philipperemy/keras-attention-mechanism.git
 
-###########################################################
+####################################################################################
 
 class CRNN:
 
-    def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), attention=False,
-                       dropout=0.4, GRU=False, n_units=256, single_attention_vector=True):
+    def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), attention=False, time_dense_size=128,
+                       opt="adam", dropout=0.5, GRU=False, n_units=256, single_attention_vector=True):
 
         self.num_classes = num_classes
         self.shape = shape
+        self.opt = opt
         self.attention = attention
         self.dropout = dropout
         self.max_string_len = max_string_len
         self.n_units = n_units
+        self.time_dense_size = time_dense_size
         self.single_attention_vector = single_attention_vector
 
-    def conv_block(self, inp, filters, conv_size, pooling=False, batchnorm=False):
-        x = Conv2D(filters, conv_size, padding='same')(inp)
+    def conv_block(self, inp, filters, conv_size, pooling=False, batchnorm=False, strides=None, conv_padding=(1, 1)):
+        x = Conv2D(filters, conv_size, padding='valid')(inp)
+        if conv_padding is not None:
+            x = ZeroPadding2D(conv_padding)(x)
         if batchnorm:
             x = BatchNormalization(center=True, scale=True)(x)
         x = Activation('relu')(x)
         if pooling:
-            x = MaxPooling2D(pool_size=(2, 2))(x)
+            x = MaxPooling2D((2, 2), strides=strides)(x)
+            self.pooling_counter += 1
         x = Dropout(self.dropout)(x)
         return x
 
     def get_model(self):
-        inputs = Input(name='the_input', shape=self.shape, dtype='float32')
+        self.pooling_counter = 0
+        inputs = Input(name='the_input', shape=self.shape, dtype='float32') #100x32x1
+        x = ZeroPadding2D(padding=(1, 1))(inputs) #102x34x1
+        x = self.conv_block(x, 64, (3, 3), pooling=False, batchnorm=False, conv_padding=(1, 1)) 
+        x = self.conv_block(x, 128, (3, 3), pooling=False, batchnorm=False, conv_padding=(1, 1))
+        x = self.conv_block(x, 256, (3, 3), pooling=True,  batchnorm=True, conv_padding=(1, 1)) #51x17x256
+        x = self.conv_block(x, 256, (3, 3), pooling=False,  batchnorm=False, conv_padding=(1, 1))
+        x = self.conv_block(x, 512, (3, 3), pooling=False,  batchnorm=True, conv_padding=(1, 1))
+        x = self.conv_block(x, 512, (3, 3), pooling=False,  batchnorm=False, conv_padding=(1, 1))
+        x = self.conv_block(x, 512, (2, 2),  pooling=False,  batchnorm=True, conv_padding=(1, 1)) #51x17x512
 
-        x = self.conv_block(x, 64, (3,3), pooling=True, batchnorm=False)
-        x = self.conv_block(x, 128, (5,5), pooling=True, batchnorm=False)
-        x = self.conv_block(x, 256, (3,3), pooling=False, batchnorm=True)
-        x = self.conv_block(x, 256, (3,3), pooling=False, batchnorm=False)
-        x = self.conv_block(x, 256, (3,3), pooling=True, batchnorm=False)
-        x = self.conv_block(x, 512, (3,3), pooling=False, batchnorm=True)
-        x = self.conv_block(x, 512, (3,3), pooling=True, batchnorm=False)
-        x = self.conv_block(x, 512, (2,2), pooling=False, batchnorm=True)
+        conv_to_rnn_dims = ((self.shape[0]+2) // (2 **  self.pooling_counter), ((self.shape[1]+2) // (2 ** self.pooling_counter)) * 512) #51x8704
+        x = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(x)
+        x = Dense(self.time_dense_size, activation='relu', name='dense1')(x)
 
         if not GRU:    
-            x = Bidirectional(LSTM(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='concat', weights=None)(x)
-            x = Dense(self.n_units, kernel_initializer='he_normal', name='rnn_dense')(x)
+            x = Bidirectional(LSTM(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='sum', weights=None)(x)
             x = Bidirectional(LSTM(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='concat', weights=None)(x)
         else:
+            x = Bidirectional(GRU(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='sum', weights=None)(x)
             x = Bidirectional(GRU(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='concat', weights=None)(x)
-            x = Dense(self.n_units, kernel_initializer='he_normal', name='rnn_dense')(x)
-            x = Bidirectional(GRU(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='concat', weights=None)(x)
+        x = Dropout(self.dropout*0.5)(x)
 
         if self.attention:
-            x = attention_3d_block(x, time_steps=self.n_units, single_attention_vector=self.single_attention_vector)
+            x = attention_3d_block(x, time_steps=conv_to_rnn_dims[0], single_attention_vector=self.single_attention_vector)
 
         x_ctc = Dense(self.num_classes, kernel_initializer='he_normal', name='dense2')(x)
         y_pred = Activation('softmax', name='softmax')(x_ctc)
@@ -91,7 +98,11 @@ class CRNN:
         loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')([y_pred, labels, input_length, label_length])
         outputs = [loss_out]
 
-        adam = optimizers.Adam(lr=0.01, beta_1=0.5, beta_2=0.999, clipvalue=5)
+        if self.opt == "adam":
+            optimizer = optimizers.Adam(lr=0.01, beta_1=0.5, beta_2=0.999, clipnorm=5)
+        elif self.opt == "sgd":
+            optimizer = optimizers.SGD(lr=0.002, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
+
         model = Model(inputs=[inputs, labels, input_length, label_length], outputs=outputs)
         model.compile(optimizer=adam, loss={"ctc": lambda y_true, y_pred: y_pred})
 
@@ -173,20 +184,17 @@ def decode_predict_ctc(a, predictor, top_paths=1, beam_width=5):
 
 class Readf:
 
-    def __init__(self, path, img_size=(40,40), trsh=100, OHE=False, normed=False, fill=255, offset=5, mjsynth=False,
-                    random_state=None, additional_channels=False, length_sort_mode='target', batch_size=32, tl=False, timesteps=10, classes=None):
+    def __init__(self, path, img_size=(40,40), trsh=100, normed=False, fill=255, offset=5, mjsynth=False,
+                    random_state=None, length_sort_mode='target', batch_size=32, classes=None):
         self.trsh = trsh
         self.mjsynth = mjsynth
-        self.timesteps = timesteps
         self.path = path
         self.batch_size = batch_size
         self.img_size = img_size
-        self.OHE = OHE
         self.flag = False
         self.offset = offset
         self.fill = fill
         self.normed = normed
-        self.additional_channels = additional_channels
         if self.mjsynth:
             self.names = open(path+"/imlist.txt", "r").readlines()[:500000]
         else:
@@ -195,16 +203,11 @@ class Readf:
         self.length = len(self.names)
         self.prng = RandomState(random_state)
         self.prng.shuffle(self.names)
-
-        #self.classes = pickle.load(open(self.path+'/classes.pickle.dat', 'rb'))
         self.classes = classes
 
-        lengths = pickle.load(open(self.path+'/lengths.pickle.dat', 'rb'))
+        lengths = get_lengths(self.names)
         if not self.mjsynth:
-            if self.OHE:
-                self.targets = pickle.load(open(self.path+'/target_ohe.pickle.dat', 'rb'))
-            else:
-                self.targets = pickle.load(open(self.path+'/target.pickle.dat', 'rb'))
+            self.targets = pickle.load(open(self.path+'/target.pickle.dat', 'rb'))
             self.max_len = max([i.shape[0] for i in self.targets.values()])
         else:
             self.mean, self.std = pickle.load(open(self.path+'/mean_std.pickle.dat', 'rb'))
@@ -296,6 +299,7 @@ class Readf:
 
                     if self.normed:
                         img = (img - self.mean) / self.std
+                        img = norm(img)
 
                     if img.shape[1] >= img.shape[0]:
                         img = img[::-1].T
@@ -322,10 +326,7 @@ class Readf:
                             'label_length': label_length,
                             'source_str': np.array(source_str)
                         }
-                        outputs = {
-                            'ctc': np.zeros([self.batch_size]),
-                            #'attention_out': np.zeros([self.batch_size])
-                        }
+                        outputs = {'ctc': np.zeros([self.batch_size])}
                         source_str, i = [], 0
                         X_data, Y_data, input_length, label_length = self.get_blank_matrices()
                         n += 1
@@ -367,11 +368,7 @@ class Readf:
                     img = cv2.threshold(img, self.trsh, 255,
                         cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
-                    if self.additional_channels:
-                        img = get_channels(img, self.trsh)
-
-                    if not self.additional_channels:
-                        img = img[:,:,np.newaxis]
+                    img = img[:,:,np.newaxis]
 
                     if self.normed:
                         img = norm(img)
@@ -387,14 +384,21 @@ class Readf:
                             'label_length': label_length,
                             'source_str': np.array(source_str)
                         }
-                        outputs = {
-                            'ctc': np.zeros([self.batch_size]),
-                            #'attention_out': np.zeros([self.batch_size])
-                        }
+                        outputs = {'ctc': np.zeros([self.batch_size])}
                         source_str, i = [], 0
                         X_data, Y_data, input_length, label_length = self.get_blank_matrices()
                         n += 1
                         yield (inputs, outputs)
+
+def get_lengths(names):
+    d = {}
+    for name in tqdm(names, desc="getting words lengths"):
+        try:
+            edited_name = re.sub(" ", "_", name.split()[0])[1:]
+        except:
+            edited_name = edited_name[1:-1]
+        d[name] = len(edited_name.split("_")[-2])
+    return d
 
 def norm(image):
     return image.astype('float32') / 255.
@@ -558,6 +562,10 @@ def set_offset_monochrome(img, offset=20, fill=0):
         
     return img[y1:y2, x1:x2].astype(np.uint8)
 
+#####################################################################################################################
+# NOT MINE CODE:
+#####################################################################################################################
+
 class LossHistory(Callback):
     def on_train_begin(self, logs={}):
         self.losses = {"loss":[], "val_loss":[]}
@@ -695,3 +703,90 @@ class CyclicLR(Callback):
             self.history.setdefault(k, []).append(v)
         
         K.set_value(self.model.optimizer.lr, self.clr())
+
+#ATTENTION LAYER
+def get_activations(model, inputs, print_shape_only=False, layer_name=None):
+    # Documentation is available online on Github at the address below.
+    # From: https://github.com/philipperemy/keras-visualize-activations
+    print('----- activations -----')
+    activations = []
+    inp = model.input
+    if layer_name is None:
+        outputs = [layer.output for layer in model.layers]
+    else:
+        outputs = [layer.output for layer in model.layers if layer.name == layer_name]  # all layer outputs
+    funcs = [K.function([inp] + [K.learning_phase()], [out]) for out in outputs]  # evaluation functions
+    layer_outputs = [func([inputs, 1.])[0] for func in funcs]
+    for layer_activations in layer_outputs:
+        activations.append(layer_activations)
+        if print_shape_only:
+            print(layer_activations.shape)
+        else:
+            print(layer_activations)
+    return activations
+
+
+def get_data(n, input_dim, attention_column=1):
+    """
+    Data generation. x is purely random except that it's first value equals the target y.
+    In practice, the network should learn that the target = x[attention_column].
+    Therefore, most of its attention should be focused on the value addressed by attention_column.
+    :param n: the number of samples to retrieve.
+    :param input_dim: the number of dimensions of each element in the series.
+    :param attention_column: the column linked to the target. Everything else is purely random.
+    :return: x: model inputs, y: model targets
+    """
+    x = np.random.standard_normal(size=(n, input_dim))
+    y = np.random.randint(low=0, high=2, size=(n, 1))
+    x[:, attention_column] = y[:, 0]
+    return x, y
+
+
+def get_data_recurrent(n, time_steps, input_dim, attention_column=10):
+    """
+    Data generation. x is purely random except that it's first value equals the target y.
+    In practice, the network should learn that the target = x[attention_column].
+    Therefore, most of its attention should be focused on the value addressed by attention_column.
+    :param n: the number of samples to retrieve.
+    :param time_steps: the number of time steps of your series.
+    :param input_dim: the number of dimensions of each element in the series.
+    :param attention_column: the column linked to the target. Everything else is purely random.
+    :return: x: model inputs, y: model targets
+    """
+    x = np.random.standard_normal(size=(n, time_steps, input_dim))
+    y = np.random.randint(low=0, high=2, size=(n, 1))
+    x[:, attention_column, :] = np.tile(y[:], (1, input_dim))
+    return x, y
+
+def attention_3d_block(inputs, time_steps, single_attention_vector):
+    # inputs.shape = (batch_size, time_steps, input_dim)
+    input_dim = int(inputs.shape[2])
+    a = Permute((2, 1))(inputs)
+    a = Reshape((input_dim, time_steps))(a) # this line is not useful. It's just to know which dimension is what.
+    a = Dense(time_steps, activation='softmax')(a)
+    if single_attention_vector:
+        a = Lambda(lambda x: K.mean(x, axis=1), name='dim_reduction')(a)
+        a = RepeatVector(input_dim)(a)
+    a_probs = Permute((2, 1), name='attention_vec')(a)
+    #output_attention_mul = merge([inputs, a_probs], name='attention_mul', mode='mul') #merge is depricated
+    output_attention_mul = multiply([inputs, a_probs], name='attention_mul')
+    return output_attention_mul
+
+# def model_attention_applied_after_lstm():
+#     inputs = Input(shape=(TIME_STEPS, INPUT_DIM,))
+#     lstm_units = 32
+#     lstm_out = LSTM(lstm_units, return_sequences=True)(inputs)
+#     attention_mul = attention_3d_block(lstm_out)
+#     attention_mul = Flatten()(attention_mul)
+#     output = Dense(1, activation='sigmoid')(attention_mul)
+#     model = Model(input=[inputs], output=output)
+#     return model
+
+# def model_attention_applied_before_lstm():
+#     inputs = Input(shape=(TIME_STEPS, INPUT_DIM,))
+#     attention_mul = attention_3d_block(inputs)
+#     lstm_units = 32
+#     attention_mul = LSTM(lstm_units, return_sequences=False)(attention_mul)
+#     output = Dense(1, activation='sigmoid')(attention_mul)
+#     model = Model(input=[inputs], output=output)
+#     return model

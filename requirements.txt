@@ -1,0 +1,6 @@
+numpy
+opencv-python
+pillow
+tqdm
+tensorflow-gpu
+keras
