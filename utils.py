@@ -36,11 +36,10 @@ from keras import backend as K
 class CRNN:
 
     def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), attention=False, time_dense_size=128,
-                       opt="adam", dropout=0.5, GRU=False, n_units=256, single_attention_vector=True):
+                       dropout=0.5, GRU=False, n_units=256, single_attention_vector=True):
 
         self.num_classes = num_classes
         self.shape = shape
-        self.opt = opt
         self.attention = attention
         self.dropout = dropout
         self.max_string_len = max_string_len
@@ -55,7 +54,7 @@ class CRNN:
         if batchnorm:
             x = BatchNormalization(center=True, scale=True)(x)
         x = Activation('relu')(x)
-        if pooling:
+        if pooling is not None:
             x = MaxPooling2D((2, 2), strides=strides)(x)
             self.pooling_counter += 1
         x = Dropout(self.dropout)(x)
@@ -64,16 +63,16 @@ class CRNN:
     def get_model(self):
         self.pooling_counter = 0
         inputs = Input(name='the_input', shape=self.shape, dtype='float32') #100x32x1
-        x = ZeroPadding2D(padding=(1, 1))(inputs) #102x34x1
+        x = ZeroPadding2D(padding=(1, 2))(inputs) #102x36x1
         x = self.conv_block(x, 64, (3, 3), pooling=False, batchnorm=False, conv_padding=(1, 1)) 
         x = self.conv_block(x, 128, (3, 3), pooling=False, batchnorm=False, conv_padding=(1, 1))
-        x = self.conv_block(x, 256, (3, 3), pooling=True,  batchnorm=True, conv_padding=(1, 1)) #51x17x256
+        x = self.conv_block(x, 256, (3, 3), pooling=True,  batchnorm=True, conv_padding=(1, 1)) #51x18x256
         x = self.conv_block(x, 256, (3, 3), pooling=False,  batchnorm=False, conv_padding=(1, 1))
-        x = self.conv_block(x, 512, (3, 3), pooling=False,  batchnorm=True, conv_padding=(1, 1))
+        x = self.conv_block(x, 512, (3, 3), pooling=(0, 2),  batchnorm=True, conv_padding=(1, 1)) #51x9x512
         x = self.conv_block(x, 512, (3, 3), pooling=False,  batchnorm=False, conv_padding=(1, 1))
-        x = self.conv_block(x, 512, (2, 2),  pooling=False,  batchnorm=True, conv_padding=(1, 1)) #51x17x512
+        x = self.conv_block(x, 512, (2, 2),  pooling=False,  batchnorm=True, conv_padding=(1, 1)) 
 
-        conv_to_rnn_dims = ((self.shape[0]+2) // (2 **  self.pooling_counter), ((self.shape[1]+2) // (2 ** self.pooling_counter)) * 512) #51x8704
+        conv_to_rnn_dims = ((self.shape[0]+2) // (2 **  self.pooling_counter), ((self.shape[1]+4) // (2 ** self.pooling_counter)) * 512) #51x4608
         x = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(x)
         x = Dense(self.time_dense_size, activation='relu', name='dense1')(x)
 
@@ -98,13 +97,8 @@ class CRNN:
         loss_out = Lambda(ctc_lambda_func, output_shape=(1,), name='ctc')([y_pred, labels, input_length, label_length])
         outputs = [loss_out]
 
-        if self.opt == "adam":
-            optimizer = optimizers.Adam(lr=0.01, beta_1=0.5, beta_2=0.999, clipnorm=5)
-        elif self.opt == "sgd":
-            optimizer = optimizers.SGD(lr=0.002, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
-
         model = Model(inputs=[inputs, labels, input_length, label_length], outputs=outputs)
-        model.compile(optimizer=adam, loss={"ctc": lambda y_true, y_pred: y_pred})
+        #model.compile(optimizer=adam, loss={"ctc": lambda y_true, y_pred: y_pred})
 
         return model
 
@@ -562,9 +556,22 @@ def set_offset_monochrome(img, offset=20, fill=0):
         
     return img[y1:y2, x1:x2].astype(np.uint8)
 
+def save_single_model(path):
+    sinlge_model = multi_model.layers[-2]
+    sinlge_model.save(path+'/single_gpu_model.hdf5')
+    model_json = sinlge_model.to_json()
+    with open(path+"/single_gpu_model.json", "w") as json_file:
+        json_file.write(model_json)
+    sinlge_model.save_weights(path+"/single_gpu_weights.h5")
+
 #####################################################################################################################
 # NOT MINE CODE:
 #####################################################################################################################
+
+from tensorflow.python.client import device_lib
+def get_available_gpus():
+    local_device_protos = device_lib.list_local_devices()
+    return [x.name for x in local_device_protos if x.device_type == 'GPU']
 
 class LossHistory(Callback):
     def on_train_begin(self, logs={}):
