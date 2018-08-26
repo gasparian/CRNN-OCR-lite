@@ -55,24 +55,28 @@ class CRNN:
             x = BatchNormalization(center=True, scale=True)(x)
         x = Activation('relu')(x)
         if pooling is not None:
-            x = MaxPooling2D((2, 2), strides=strides)(x)
-            self.pooling_counter += 1
+            x = MaxPooling2D(pooling, strides=strides)(x)
+            if pooling[0] == 2:
+                self.pooling_counter_h += 1
+            if pooling[1] == 2:
+                self.pooling_counter_w += 1
         x = Dropout(self.dropout)(x)
         return x
 
     def get_model(self):
-        self.pooling_counter = 0
+        self.pooling_counter_h, self.pooling_counter_w = 0, 0
         inputs = Input(name='the_input', shape=self.shape, dtype='float32') #100x32x1
         x = ZeroPadding2D(padding=(1, 2))(inputs) #102x36x1
-        x = self.conv_block(x, 64, (3, 3), pooling=False, batchnorm=False, conv_padding=(1, 1)) 
-        x = self.conv_block(x, 128, (3, 3), pooling=False, batchnorm=False, conv_padding=(1, 1))
-        x = self.conv_block(x, 256, (3, 3), pooling=True,  batchnorm=True, conv_padding=(1, 1)) #51x18x256
-        x = self.conv_block(x, 256, (3, 3), pooling=False,  batchnorm=False, conv_padding=(1, 1))
-        x = self.conv_block(x, 512, (3, 3), pooling=(0, 2),  batchnorm=True, conv_padding=(1, 1)) #51x9x512
-        x = self.conv_block(x, 512, (3, 3), pooling=False,  batchnorm=False, conv_padding=(1, 1))
-        x = self.conv_block(x, 512, (2, 2),  pooling=False,  batchnorm=True, conv_padding=(1, 1)) 
+        x = self.conv_block(x, 64, (3, 3), pooling=None, batchnorm=False, conv_padding=(1, 1)) 
+        x = self.conv_block(x, 128, (3, 3), pooling=None, batchnorm=False, conv_padding=(1, 1))
+        x = self.conv_block(x, 256, (3, 3), pooling=(2, 2),  batchnorm=True, conv_padding=(1, 1)) #51x18x256
+        x = self.conv_block(x, 256, (3, 3), pooling=None,  batchnorm=False, conv_padding=(1, 1))
+        x = self.conv_block(x, 512, (3, 3), pooling=(1, 2),  batchnorm=True, conv_padding=(1, 1)) #51x9x512
+        x = self.conv_block(x, 512, (3, 3), pooling=None,  batchnorm=False, conv_padding=(1, 1))
+        x = self.conv_block(x, 512, (3, 3),  pooling=None,  batchnorm=True, conv_padding=(1, 1))
 
-        conv_to_rnn_dims = ((self.shape[0]+2) // (2 **  self.pooling_counter), ((self.shape[1]+4) // (2 ** self.pooling_counter)) * 512) #51x4608
+        conv_to_rnn_dims = ((self.shape[0]+2) // (2 **  self.pooling_counter_h), ((self.shape[1]+4) // (2 ** self.pooling_counter_w)) * 512) #51x4608
+        print(conv_to_rnn_dims)
         x = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(x)
         x = Dense(self.time_dense_size, activation='relu', name='dense1')(x)
 
@@ -306,8 +310,7 @@ class Readf:
                     else:
                         input_length[i] *= (self.img_size[0]) // downsample_factor - 2
 
-                    if not self.additional_channels:
-                        img = img[:,:,np.newaxis]
+                    img = img[:,:,np.newaxis]
 
                     X_data[i] = img
                     i += 1

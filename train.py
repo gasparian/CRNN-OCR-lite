@@ -9,19 +9,23 @@ from shutil import copyfile, rmtree
 import tqdm
 import numpy as np
 from numpy.random import RandomState
-from utils import *
 
 import tensorflow as tf
 from keras import backend as K
 from keras.callbacks import ModelCheckpoint
 from keras.utils.training_utils import multi_gpu_model
 
+from utils import *
+
 if __name__ == '__main__':
 
-    parser = argparse.ArgumentParser(description='quickDraw classifier')
+    #python3 train.py --path /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --save_path /data/OCR/data --model_name OCR_ver3 --norm --mjsynth --opt sgd
+
+    parser = argparse.ArgumentParser(description='crnn_ctc_loss')
     parser.add_argument('-p', '--path', type=str, required=True)
     parser.add_argument('--save_path', type=str, required=True)
     parser.add_argument('--model_name', type=str, required=True)
+    parser.add_argument('--nbepochs', type=int, default=50)
     parser.add_argument('--G', type=int, default=1)
     parser.add_argument('--imgh', type=int, default=100)
     parser.add_argument('--imgW', type=int, default=32)
@@ -43,27 +47,32 @@ if __name__ == '__main__':
     parser.add_argument('--attention', action='store_true')
     parser.add_argument('--GRU', action='store_true')
     args = parser.parse_args()
+    globals().update(vars(args))
+
+    try:
+        rmtree(save_path+"/"+model_name)
+    except:
+        pass
+    os.mkdir(save_path+"/"+model_name)
     with open(save_path+'/'+model_name+"/arguments.txt", "w") as f:
         f.write(str(args))
     globals().update(vars(args))
-
     if opt == "adam":
-        optimizer = optimizers.Adam(lr=0.01, beta_1=0.5, beta_2=0.999, clipnorm=5)
+        optimizer = optimizers.Adam(lr=0.002, beta_1=0.5, beta_2=0.999, clipnorm=5)
     elif opt == "sgd":
         optimizer = optimizers.SGD(lr=0.002, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
 
     print("[INFO] GPU devices:%s" % get_available_gpus())
 
     classes = {i:j for i, j in zip(string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation+' ', range(len(string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation)+1))}
+    img_size = (imgh, imgW)
     reader = Readf(
-        path, img_size=(imgh, imgW), trsh=trsh, normed=norm,
+        path, img_size=img_size, trsh=trsh, normed=norm,
         mjsynth=mjsynth, offset=offset, fill=fill, random_state=random_state, 
         length_sort_mode=length_sort_mode, classes=classes
     )
 
-    channels = 1
-    img_size = img_size+(channels,)
-
+    img_size = img_size+(1,)
     names = np.array(list(reader.names.keys()))
     rndm = RandomState(random_state)
     length = len(names)
@@ -77,7 +86,7 @@ if __name__ == '__main__':
 
     init_model = CRNN(num_classes=len(reader.classes)+1, shape=img_size, dropout=dropout,
         attention=attention, GRU=GRU, time_dense_size=time_dense_size, single_attention_vector=single_attention_vector,
-        n_units=n_units, max_string_len=reader.max_len, attention_units=reader.max_len*2)
+        n_units=n_units, max_string_len=reader.max_len)
 
     if G <= 1:
         print("[INFO] training with 1 GPU...")
@@ -96,12 +105,6 @@ if __name__ == '__main__':
     model.summary()
 
     start_time = time.time()
-    try:
-        rmtree(save_path+"/"+model_name)
-    except:
-        pass
-    os.mkdir(save_path+"/"+model_name)
-
     train_steps = len(train) // batch_size
     test_steps = len(val) // batch_size
 
@@ -115,10 +118,10 @@ if __name__ == '__main__':
                                    save_best_only=True, save_weights_only=True)
     clr = CyclicLR(base_lr=0.001, max_lr=max_lr, step_size=train_steps*2, mode='triangular')
 
-    H = model.fit_generator(generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter),
+    H = model.fit_generator(generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),
                 steps_per_epoch=train_steps,
-                epochs=config.nbepochs,
-                validation_data=reader.run_generator(val, downsample_factor=2**init_model.pooling_counter),
+                epochs=nbepochs,
+                validation_data=reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h),
                 validation_steps=test_steps,
                 shuffle=False, verbose=1,
                 callbacks=[
@@ -136,7 +139,7 @@ if __name__ == '__main__':
 
     print(" [INFO] Computing edit distance metric with the best model...")
     model = load_model_custom(save_path+"/"+model_name, weights="checkpoint_weights")
-    predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter),
+    predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h),
             steps=test_steps, use_multiprocessing=False, workers=1)
     y_true = reader.get_labels(val)
     edit_distance_score = edit_distance(predicted, y_true)
