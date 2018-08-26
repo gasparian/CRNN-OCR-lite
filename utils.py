@@ -102,8 +102,6 @@ class CRNN:
         outputs = [loss_out]
 
         model = Model(inputs=[inputs, labels, input_length, label_length], outputs=outputs)
-        #model.compile(optimizer=adam, loss={"ctc": lambda y_true, y_pred: y_pred})
-
         return model
 
 def ctc_lambda_func(args):
@@ -225,7 +223,7 @@ class Readf:
 
     def make_target(self, text):
         voc = list(self.classes.keys())
-        return np.array([self.classes[char] for char in text if char in voc])
+        return np.array([self.classes[char] if char in voc else self.classes['-'] for char in text])
 
     def parse_name(self, name):
         return name.split('.')[-2].split('/')[-1]
@@ -289,6 +287,7 @@ class Readf:
                     except:
                         continue
 
+                    word = word.lower()
                     source_str.append(word)
 
                     word = self.make_target(word)
@@ -297,7 +296,6 @@ class Readf:
 
                     if self.normed:
                         img = (img - self.mean) / self.std
-                        img = norm(img)
 
                     if img.shape[1] >= img.shape[0]:
                         img = img[::-1].T

@@ -40,7 +40,7 @@ if __name__ == '__main__':
     parser.add_argument('--n_units', type=int, default=256)
     parser.add_argument('--dropout', type=float, default=0.5)
     parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--opt', type=str, default="adam")
+    parser.add_argument('--opt', type=str, default="sgd")
     parser.add_argument('--max_lr', type=float, default=0.006)
     parser.add_argument('--norm', action='store_true')
     parser.add_argument('--mjsynth', action='store_true')
@@ -64,7 +64,12 @@ if __name__ == '__main__':
 
     print("[INFO] GPU devices:%s" % get_available_gpus())
 
-    classes = {i:j for i, j in zip(string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation+' ', range(len(string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation)+1))}
+    lexicon = [i for i in '0123456789'+string.ascii_lowercase+'-']
+    #lexicon = [i for i in string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation+' ']
+    classes = {j:i for i, j in enumerate(lexicon)}
+
+    print(classes)
+
     img_size = (imgh, imgW)
     reader = Readf(
         path, img_size=img_size, trsh=trsh, normed=norm,
@@ -84,7 +89,7 @@ if __name__ == '__main__':
 
     print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(reader.classes)+1, reader.max_len))
 
-    init_model = CRNN(num_classes=len(reader.classes)+1, shape=img_size, dropout=dropout,
+    init_model = CRNN(num_classes=len(classes)+1, shape=img_size, dropout=dropout,
         attention=attention, GRU=GRU, time_dense_size=time_dense_size, single_attention_vector=single_attention_vector,
         n_units=n_units, max_string_len=reader.max_len)
 
