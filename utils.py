@@ -30,6 +30,7 @@ from keras import backend as K
 # https://github.com/meijieru/crnn.pytorch
 # https://github.com/sbillburg/CRNN-with-STN/blob/master/CRNN_with_STN.py
 # https://github.com/keras-team/keras-applications/blob/master/keras_applications/mobilenet.py
+# https://github.com/zepingyu0512/srnn/blob/master/SRNN.py ???
 #
 # attention block:
 # https://github.com/philipperemy/keras-attention-mechanism.git
@@ -57,26 +58,12 @@ class CRNN:
         self.single_attention_vector = single_attention_vector
 
     def depthwise_conv_block(self, inputs, pointwise_conv_filters, conv_size=(3, 3), pooling=None):
-
         x = DepthwiseConv2D((3, 3), padding='same', strides=(1, 1), depth_multiplier=1, use_bias=False)(inputs)
         x = BatchNormalization(axis=-1)(x)
         x = ReLU(6.)(x)
         x = Conv2D(pointwise_conv_filters, (1, 1), strides=(1, 1), padding='same', use_bias=False)(x)
         x = BatchNormalization(axis=-1)(x)
-        if pooling is not None:
-            x = MaxPooling2D(pooling)(x)
-            if pooling[0] == 2:
-                self.pooling_counter_h += 1
-            if pooling[1] == 2:
-                self.pooling_counter_w += 1
         x = ReLU(6.)(x)
-        return Dropout(0.1)(x)
-
-    def conv_block(self, inp, filters, conv_size, pooling=False, batchnorm=False):
-        x = Conv2D(filters, conv_size, padding='same')(inp)
-        if batchnorm:
-            x = BatchNormalization(center=True, scale=True)(x)
-        x = Activation('relu')(x)
         if pooling is not None:
             x = MaxPooling2D(pooling)(x)
             if pooling[0] == 2:
@@ -89,15 +76,6 @@ class CRNN:
         self.pooling_counter_h, self.pooling_counter_w = 0, 0
         inputs = Input(name='the_input', shape=self.shape, dtype='float32') #100x32x1
         x = ZeroPadding2D(padding=(1, 2))(inputs) #102x36x1
-
-        # x = self.conv_block(x, 64, (3, 3), pooling=None, batchnorm=False) 
-        # x = self.conv_block(x, 128, (3, 3), pooling=None, batchnorm=False)
-        # x = self.conv_block(x, 256, (3, 3), pooling=(2, 2),  batchnorm=True) #51x18x256
-        # x = self.conv_block(x, 256, (3, 3), pooling=None,  batchnorm=False)
-        # x = self.conv_block(x, 512, (3, 3), pooling=(1, 2),  batchnorm=True) #51x9x512
-        # x = self.conv_block(x, 512, (3, 3), pooling=None,  batchnorm=False)
-        # x = self.conv_block(x, 512, (3, 3),  pooling=None,  batchnorm=True)
-
         x = self.depthwise_conv_block(x, 64, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 128, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=(2, 2))  #51x18x256
