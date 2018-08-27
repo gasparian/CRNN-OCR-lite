@@ -25,7 +25,7 @@ if __name__ == '__main__':
     parser.add_argument('-p', '--path', type=str, required=True)
     parser.add_argument('--save_path', type=str, required=True)
     parser.add_argument('--model_name', type=str, required=True)
-    parser.add_argument('--nbepochs', type=int, default=50)
+    parser.add_argument('--nbepochs', type=int, default=15)
     parser.add_argument('--G', type=int, default=1)
     parser.add_argument('--imgh', type=int, default=100)
     parser.add_argument('--imgW', type=int, default=32)

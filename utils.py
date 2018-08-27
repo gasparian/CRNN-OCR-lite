@@ -51,7 +51,6 @@ class CRNN:
         self.num_classes = num_classes
         self.shape = shape
         self.attention = attention
-        self.dropout = dropout
         self.max_string_len = max_string_len
         self.n_units = n_units
         self.time_dense_size = time_dense_size
