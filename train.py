@@ -38,7 +38,6 @@ if __name__ == '__main__':
     parser.add_argument('--time_dense_size', type=int, default=128)
     parser.add_argument('--single_attention_vector', type=bool, default=True)
     parser.add_argument('--n_units', type=int, default=256)
-    parser.add_argument('--dropout', type=float, default=0.5)
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--opt', type=str, default="sgd")
     parser.add_argument('--max_lr', type=float, default=0.006)
@@ -89,8 +88,8 @@ if __name__ == '__main__':
 
     print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(reader.classes)+1, reader.max_len))
 
-    init_model = CRNN(num_classes=len(classes)+1, shape=img_size, dropout=dropout,
-        attention=attention, GRU=GRU, time_dense_size=time_dense_size, single_attention_vector=single_attention_vector,
+    init_model = CRNN(num_classes=len(classes)+1, shape=img_size, attention=attention, 
+        GRU=GRU, time_dense_size=time_dense_size, single_attention_vector=single_attention_vector,
         n_units=n_units, max_string_len=reader.max_len)
 
     if G <= 1:

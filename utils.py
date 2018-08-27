@@ -46,7 +46,7 @@ from keras import backend as K
 class CRNN:
 
     def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), attention=False, time_dense_size=128,
-                       dropout=0.5, GRU=False, n_units=256, single_attention_vector=True):
+                       GRU=False, n_units=256, single_attention_vector=True):
 
         self.num_classes = num_classes
         self.shape = shape
@@ -70,7 +70,8 @@ class CRNN:
                 self.pooling_counter_h += 1
             if pooling[1] == 2:
                 self.pooling_counter_w += 1
-        return ReLU(6.)(x)
+        x = ReLU(6.)(x)
+        return Dropout(0.1)(x)
 
     def conv_block(self, inp, filters, conv_size, pooling=False, batchnorm=False):
         x = Conv2D(filters, conv_size, padding='same')(inp)
@@ -83,8 +84,7 @@ class CRNN:
                 self.pooling_counter_h += 1
             if pooling[1] == 2:
                 self.pooling_counter_w += 1
-        x = Dropout(self.dropout*0.1)(x)
-        return x
+        return Dropout(0.1)(x)
 
     def get_model(self):
         self.pooling_counter_h, self.pooling_counter_w = 0, 0
@@ -110,6 +110,7 @@ class CRNN:
         conv_to_rnn_dims = ((self.shape[0]+2) // (2 **  self.pooling_counter_h), ((self.shape[1]+4) // (2 ** self.pooling_counter_w)) * 512) #51x4608
         x = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(x)
         x = Dense(self.time_dense_size, activation='relu', name='dense1')(x)
+        x = Dropout(0.4)(x)
 
         if not GRU:    
             x = Bidirectional(LSTM(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='sum', weights=None)(x)
@@ -117,7 +118,7 @@ class CRNN:
         else:
             x = Bidirectional(GRU(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='sum', weights=None)(x)
             x = Bidirectional(GRU(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='concat', weights=None)(x)
-        x = Dropout(self.dropout*0.5)(x)
+        x = Dropout(0.2)(x)
 
         if self.attention:
             x = attention_3d_block(x, time_steps=conv_to_rnn_dims[0], single_attention_vector=self.single_attention_vector)
