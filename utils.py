@@ -10,7 +10,9 @@ from numpy.random import RandomState
 from PIL import Image, ImageDraw
 from tqdm import tqdm
 
-from keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, Dense, Input, Lambda, Bidirectional, ZeroPadding2D, concatenate, multiply
+from keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, \
+                         Dense, Input, Lambda, Bidirectional, ZeroPadding2D, \
+                         concatenate, multiply, ReLU, DepthwiseConv2D
 #from keras.layers import LSTM, GRU
 from keras.layers import CuDNNLSTM as LSTM
 from keras.layers import CuDNNGRU as GRU
@@ -27,9 +29,17 @@ from keras import backend as K
 
 # https://github.com/meijieru/crnn.pytorch
 # https://github.com/sbillburg/CRNN-with-STN/blob/master/CRNN_with_STN.py
+# https://github.com/keras-team/keras-applications/blob/master/keras_applications/mobilenet.py
 #
 # attention block:
 # https://github.com/philipperemy/keras-attention-mechanism.git
+
+####################################################################################
+# LOGS:
+####################################################################################
+
+# - casual convs: 8857k params; 16 epochs, 500k training examples: ctc_loss - ~0.91
+# - depthwise separable convs: 2785k params; 15 epochs, 500k training examples: 
 
 ####################################################################################
 
@@ -47,36 +57,57 @@ class CRNN:
         self.time_dense_size = time_dense_size
         self.single_attention_vector = single_attention_vector
 
-    def conv_block(self, inp, filters, conv_size, pooling=False, batchnorm=False, strides=None, conv_padding=(1, 1)):
-        x = Conv2D(filters, conv_size, padding='valid')(inp)
-        if conv_padding is not None:
-            x = ZeroPadding2D(conv_padding)(x)
-        if batchnorm:
-            x = BatchNormalization(center=True, scale=True)(x)
-        x = Activation('relu')(x)
+    def depthwise_conv_block(self, inputs, pointwise_conv_filters, conv_size=(3, 3), pooling=None):
+
+        x = DepthwiseConv2D((3, 3), padding='same', strides=(1, 1), depth_multiplier=1, use_bias=False)(inputs)
+        x = BatchNormalization(axis=-1)(x)
+        x = ReLU(6.)(x)
+        x = Conv2D(pointwise_conv_filters, (1, 1), strides=(1, 1), padding='same', use_bias=False)(x)
+        x = BatchNormalization(axis=-1)(x)
         if pooling is not None:
-            x = MaxPooling2D(pooling, strides=strides)(x)
+            x = MaxPooling2D(pooling)(x)
             if pooling[0] == 2:
                 self.pooling_counter_h += 1
             if pooling[1] == 2:
                 self.pooling_counter_w += 1
-        x = Dropout(self.dropout)(x)
+        return ReLU(6.)(x)
+
+    def conv_block(self, inp, filters, conv_size, pooling=False, batchnorm=False):
+        x = Conv2D(filters, conv_size, padding='same')(inp)
+        if batchnorm:
+            x = BatchNormalization(center=True, scale=True)(x)
+        x = Activation('relu')(x)
+        if pooling is not None:
+            x = MaxPooling2D(pooling)(x)
+            if pooling[0] == 2:
+                self.pooling_counter_h += 1
+            if pooling[1] == 2:
+                self.pooling_counter_w += 1
+        x = Dropout(self.dropout*0.1)(x)
         return x
 
     def get_model(self):
         self.pooling_counter_h, self.pooling_counter_w = 0, 0
         inputs = Input(name='the_input', shape=self.shape, dtype='float32') #100x32x1
         x = ZeroPadding2D(padding=(1, 2))(inputs) #102x36x1
-        x = self.conv_block(x, 64, (3, 3), pooling=None, batchnorm=False, conv_padding=(1, 1)) 
-        x = self.conv_block(x, 128, (3, 3), pooling=None, batchnorm=False, conv_padding=(1, 1))
-        x = self.conv_block(x, 256, (3, 3), pooling=(2, 2),  batchnorm=True, conv_padding=(1, 1)) #51x18x256
-        x = self.conv_block(x, 256, (3, 3), pooling=None,  batchnorm=False, conv_padding=(1, 1))
-        x = self.conv_block(x, 512, (3, 3), pooling=(1, 2),  batchnorm=True, conv_padding=(1, 1)) #51x9x512
-        x = self.conv_block(x, 512, (3, 3), pooling=None,  batchnorm=False, conv_padding=(1, 1))
-        x = self.conv_block(x, 512, (3, 3),  pooling=None,  batchnorm=True, conv_padding=(1, 1))
+
+        # x = self.conv_block(x, 64, (3, 3), pooling=None, batchnorm=False) 
+        # x = self.conv_block(x, 128, (3, 3), pooling=None, batchnorm=False)
+        # x = self.conv_block(x, 256, (3, 3), pooling=(2, 2),  batchnorm=True) #51x18x256
+        # x = self.conv_block(x, 256, (3, 3), pooling=None,  batchnorm=False)
+        # x = self.conv_block(x, 512, (3, 3), pooling=(1, 2),  batchnorm=True) #51x9x512
+        # x = self.conv_block(x, 512, (3, 3), pooling=None,  batchnorm=False)
+        # x = self.conv_block(x, 512, (3, 3),  pooling=None,  batchnorm=True)
+
+        x = self.depthwise_conv_block(x, 64, conv_size=(3, 3), pooling=None)
+        x = self.depthwise_conv_block(x, 128, conv_size=(3, 3), pooling=None)
+        x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=(2, 2))  #51x18x256
+        x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=None)
+        x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=(1, 2))  #51x9x512
+        x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=None)
+        x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=None)
 
         conv_to_rnn_dims = ((self.shape[0]+2) // (2 **  self.pooling_counter_h), ((self.shape[1]+4) // (2 ** self.pooling_counter_w)) * 512) #51x4608
-        print(conv_to_rnn_dims)
         x = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(x)
         x = Dense(self.time_dense_size, activation='relu', name='dense1')(x)
 
@@ -240,6 +271,7 @@ class Readf:
                 word = name.split("_")[-2]
             else:
                 word = self.targets[self.parse_name(name)]
+            word = word.lower()
             c += 1
             Y_data[i, 0:len(word)] = self.make_target(word)
 
@@ -797,4 +829,4 @@ def attention_3d_block(inputs, time_steps, single_attention_vector):
 #     attention_mul = LSTM(lstm_units, return_sequences=False)(attention_mul)
 #     output = Dense(1, activation='sigmoid')(attention_mul)
 #     model = Model(input=[inputs], output=output)
-#     return model
+#     return models
