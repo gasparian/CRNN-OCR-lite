@@ -19,13 +19,13 @@ from utils import *
 
 if __name__ == '__main__':
 
-    #python3 train.py --path /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --save_path /data/OCR/data --model_name OCR_ver3 --norm --mjsynth --opt sgd
+    #python3 train.py --path /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --save_path /data/OCR/data --model_name OCR_ver5 --nbepochs 2 --norm --mjsynth --opt sgd
 
     parser = argparse.ArgumentParser(description='crnn_ctc_loss')
     parser.add_argument('-p', '--path', type=str, required=True)
     parser.add_argument('--save_path', type=str, required=True)
     parser.add_argument('--model_name', type=str, required=True)
-    parser.add_argument('--nbepochs', type=int, default=15)
+    parser.add_argument('--nbepochs', type=int, default=20)
     parser.add_argument('--G', type=int, default=1)
     parser.add_argument('--imgh', type=int, default=100)
     parser.add_argument('--imgW', type=int, default=32)
@@ -63,11 +63,14 @@ if __name__ == '__main__':
 
     print("[INFO] GPU devices:%s" % get_available_gpus())
 
+    """
+    Non-intersecting letters: AaBbDdEeFfGgHhLlMmNnQqRrTt
+    """
     lexicon = [i for i in '0123456789'+string.ascii_lowercase+'-']
     #lexicon = [i for i in string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation+' ']
     classes = {j:i for i, j in enumerate(lexicon)}
-
-    print(classes)
+    inverse_classes = {v:k for k, v in classes.items()}
+    print(" [INFO] %s" % classes)
 
     img_size = (imgh, imgW)
     reader = Readf(
@@ -85,6 +88,12 @@ if __name__ == '__main__':
     #train = names[np.sort(train_indeces)] #sort or not?
     train = names[train_indeces]
     val = names[[i for i in range(len(names)) if i not in train_indeces]]
+    train_steps = len(train) // batch_size
+    if (len(train) % batch_size) > 0:
+        train_steps += 1
+    test_steps = len(val) // batch_size
+    if (len(val) % batch_size) > 0:
+        test_steps += 1
 
     print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(reader.classes)+1, reader.max_len))
 
@@ -109,8 +118,6 @@ if __name__ == '__main__':
     model.summary()
 
     start_time = time.time()
-    train_steps = len(train) // batch_size
-    test_steps = len(val) // batch_size
 
     model_json = model.to_json()
     with open(save_path+'/'+model_name+"/model.json", "w") as json_file:
@@ -143,8 +150,13 @@ if __name__ == '__main__':
 
     print(" [INFO] Computing edit distance metric with the best model...")
     model = load_model_custom(save_path+"/"+model_name, weights="checkpoint_weights")
-    predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h),
-            steps=test_steps, use_multiprocessing=False, workers=1)
+    model = init_predictor(model)
+    predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h), steps=test_steps*2)
+
     y_true = reader.get_labels(val)
-    edit_distance_score = edit_distance(predicted, y_true)
-    print(" [INFO] Portion of words with edit distance <= 1: %s " % edit_distance_score)
+    true_text = []
+    for i in range(len(y_true)):
+        true_text.append(labels_to_text(y_true[i], inverse_classes=inverse_classes))
+    predicted_text = decode_predict_ctc(out=predicted, top_paths=1, beam_width=5, inverse_classes=inverse_classes)
+    edit_distance_score = edit_distance(predicted_text, true_text)
+    print(" [INFO] Edit distances: %s " % (edit_distance_score))

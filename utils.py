@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 from keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, \
                          Dense, Input, Lambda, Bidirectional, ZeroPadding2D, \
-                         concatenate, multiply, ReLU, DepthwiseConv2D
+                         concatenate, multiply, ReLU, DepthwiseConv2D, TimeDistributed
 #from keras.layers import LSTM, GRU
 from keras.layers import CuDNNLSTM as LSTM
 from keras.layers import CuDNNGRU as GRU
@@ -23,26 +23,42 @@ from keras.models import Model, load_model, model_from_json
 from keras import optimizers
 from keras import backend as K
 
-####################################################################################
-#                                 REFERENCES                                       #
-####################################################################################
+###############################################################################################
+#                                       REFERENCES                                            #
+###############################################################################################
 
 # https://github.com/meijieru/crnn.pytorch
 # https://github.com/sbillburg/CRNN-with-STN/blob/master/CRNN_with_STN.py
+# https://github.com/keras-team/keras/blob/master/examples/image_ocr.py
 # https://github.com/keras-team/keras-applications/blob/master/keras_applications/mobilenet.py
-# https://github.com/zepingyu0512/srnn/blob/master/SRNN.py ???
 #
-# attention block:
+# Slices RNN:
+# https://github.com/zepingyu0512/srnn/blob/master/SRNN.py
+#
+# Attention block:
 # https://github.com/philipperemy/keras-attention-mechanism.git
 
-####################################################################################
+###############################################################################################
 # LOGS:
-####################################################################################
+###############################################################################################
 
 # - casual convs: 8857k params; 16 epochs, 500k training examples: ctc_loss - ~0.91
-# - depthwise separable convs: 2785k params; 15 epochs, 500k training examples: 
+# - depthwise separable convs and dropouts: 2785k params; 15 epochs, 500k training 
+#   examples: ~1.1 (need more little bit more epochs)
 
-####################################################################################
+###############################################################################################
+
+###############################################################################################
+# TO DO:
+###############################################################################################
+
+# - add bidirectional sliced lstm to make net much more faster;
+# - problem with N batches in inference mode - why it's need to multiply by 2 the 
+# number of steps?;
+# - get distribution on word length on test set;
+# - create custom metric for levenstein distances <= 1;
+
+###############################################################################################
 
 class CRNN:
 
@@ -84,10 +100,12 @@ class CRNN:
         x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=None)
 
-        conv_to_rnn_dims = ((self.shape[0]+2) // (2 **  self.pooling_counter_h), ((self.shape[1]+4) // (2 ** self.pooling_counter_w)) * 512) #51x4608
-        x = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(x)
-        x = Dense(self.time_dense_size, activation='relu', name='dense1')(x)
+        conv_to_rnn_dims = ((self.shape[0]+2) // (2 ** self.pooling_counter_h), ((self.shape[1]+4) // (2 ** self.pooling_counter_w)) * 512)
+        x = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(x) #51x4608
+        x = Dense(self.time_dense_size, activation='relu', name='dense1')(x) #51x128
         x = Dropout(0.4)(x)
+
+        #add here bidirectional sliced LSTM
 
         if not GRU:    
             x = Bidirectional(LSTM(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='sum', weights=None)(x)
@@ -124,7 +142,7 @@ def levenshtein(seq1, seq2):
     size_x = len(seq1) + 1
     size_y = len(seq2) + 1
 
-    matrix = np.zeros ((size_x, size_y))
+    matrix = np.zeros((size_x, size_y))
     for x in range(size_x):
         matrix [x, 0] = x
     for y in range(size_y):
@@ -147,12 +165,14 @@ def levenshtein(seq1, seq2):
     return (matrix[size_x - 1, size_y - 1])
 
 def edit_distance(y_pred, y_true):
-    c = 0
+    c = {}
     for y0, y in zip(y_pred, y_true):
         distance = levenshtein(y0, y)
-        if distance <= 1:
-            c += 1
-    return c / len(y_true)
+        if distance not in c.keys():
+            c[distance] = 1
+        c[distance] += 1
+    c = {k:v/len(y_true) for k, v in c.items()}
+    return c
 
 def load_model_custom(path, weights="model"):
     json_file = open(path+'/model.json', 'r')
@@ -168,22 +188,26 @@ def init_predictor(model):
 def labels_to_text(labels, inverse_classes=None):
     ret = []
     for c in labels:
-        if c == len(inverse_classes):
+        if c == len(inverse_classes) or c == -1:
             ret.append("")
         else:
-            ret.append(inverse_classes[c])
+            ret.append(str(inverse_classes[c]))
     return "".join(ret)
 
-def decode_predict_ctc(a, predictor, top_paths=1, beam_width=5):
-    c = np.expand_dims(a.T, axis=0)
-    out = predictor.predict(c)
+def decode_predict_ctc(out=None, a=None, predictor=None, top_paths=1, beam_width=5, inverse_classes=None):
+    if out is None:
+        c = np.expand_dims(a.T, axis=0)
+        out = predictor.predict(c)
     results = []
     if beam_width < top_paths:
         beam_width = top_paths
-    for i in range(top_paths):
-        labels = K.get_value(K.ctc_decode(out, input_length=np.ones(out.shape[0])*out.shape[1],
-                           greedy=False, beam_width=beam_width, top_paths=top_paths)[0][i])[0]
-        text = labels_to_text(labels)
+    for i in tqdm(range(out.shape[0])):
+        text = ""
+        for j in range(top_paths):
+            inp = np.expand_dims(out[i], axis=0)
+            labels = K.get_value(K.ctc_decode(inp, input_length=np.ones(inp.shape[0])*inp.shape[1],
+                               greedy=False, beam_width=beam_width, top_paths=top_paths)[0][j])[0]
+            text += labels_to_text(labels, inverse_classes)
         results.append(text)
     return results
 
@@ -243,16 +267,14 @@ class Readf:
         for i, name in enumerate(names):
             if self.mjsynth:
                 try:
-                    name = re.sub(" ", "_", name.split()[0])[1:]
+                    img, word = self.open_img(name, pad=True)
                 except:
-                    name = name[1:-1]
-                word = name.split("_")[-2]
+                    continue
             else:
                 word = self.targets[self.parse_name(name)]
             word = word.lower()
             c += 1
             Y_data[i, 0:len(word)] = self.make_target(word)
-
         return Y_data
 
     def open_img(self, name, pad=True):
@@ -323,7 +345,18 @@ class Readf:
                     X_data[i] = img
                     i += 1
 
-                    if i == self.batch_size:
+                    if n == N and i == (len(names) % self.batch_size):
+                        inputs = {
+                            'the_input': X_data,
+                            'the_labels': Y_data,
+                            'input_length': input_length,
+                            'label_length': label_length,
+                            'source_str': np.array(source_str)
+                        }
+                        outputs = {'ctc': np.zeros([self.batch_size])}
+                        yield (inputs, outputs)
+
+                    elif i == self.batch_size:
                         inputs = {
                             'the_input': X_data,
                             'the_labels': Y_data,
@@ -381,7 +414,18 @@ class Readf:
                     X_data[i] = img
                     i += 1
 
-                    if i == self.batch_size:
+                    if n == N and i == (len(names) % self.batch_size):
+                        inputs = {
+                            'the_input': X_data,
+                            'the_labels': Y_data,
+                            'input_length': input_length,
+                            'label_length': label_length,
+                            'source_str': np.array(source_str)
+                        }
+                        outputs = {'ctc': np.zeros([self.batch_size])}
+                        yield (inputs, outputs)
+
+                    elif i == self.batch_size:
                         inputs = {
                             'the_input': X_data,
                             'the_labels': Y_data,
