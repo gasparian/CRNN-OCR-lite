@@ -19,7 +19,7 @@ from utils import *
 
 if __name__ == '__main__':
 
-    #python3 train.py --path /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --save_path /data/OCR/data --model_name OCR_ver5 --nbepochs 2 --norm --mjsynth --opt sgd
+    #python3 train.py --path /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --save_path /data/OCR/data --model_name OCR_ver6 --nbepochs 10 --norm --mjsynth --opt sgd --time_dense_size 128
 
     parser = argparse.ArgumentParser(description='crnn_ctc_loss')
     parser.add_argument('-p', '--path', type=str, required=True)
@@ -45,6 +45,7 @@ if __name__ == '__main__':
     parser.add_argument('--mjsynth', action='store_true')
     parser.add_argument('--attention', action='store_true')
     parser.add_argument('--GRU', action='store_true')
+    parser.add_argument('--cyclic_RL', action='store_true')
     args = parser.parse_args()
     globals().update(vars(args))
 
@@ -125,9 +126,13 @@ if __name__ == '__main__':
     with open(save_path+'/'+model_name + '/model_summary.txt','w') as f:
         model.summary(print_fn=lambda x: f.write(x + '\n'))
 
+    cb_list = []
     checkpointer = ModelCheckpoint(filepath=save_path+'/%s/checkpoint_weights.h5'%model_name, verbose=1, 
                                    save_best_only=True, save_weights_only=True)
-    clr = CyclicLR(base_lr=0.001, max_lr=max_lr, step_size=train_steps*2, mode='triangular')
+    cb_list.append(checkpointer)
+    if cyclic_RL:
+        clr = CyclicLR(base_lr=0.001, max_lr=max_lr, step_size=train_steps*2, mode='triangular')
+        cb_list.append(clr)
 
     H = model.fit_generator(generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),
                 steps_per_epoch=train_steps,
@@ -135,10 +140,7 @@ if __name__ == '__main__':
                 validation_data=reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h),
                 validation_steps=test_steps,
                 shuffle=False, verbose=1,
-                callbacks=[
-                    checkpointer, 
-                    #clr
-                ])
+                callbacks=cb_list)
     print(" [INFO] Training finished in %i sec.!" % (time.time() - start_time))
 
     model.save_weights(save_path+'/'+model_name+"/final_weights.h5")
@@ -157,6 +159,6 @@ if __name__ == '__main__':
     true_text = []
     for i in range(len(y_true)):
         true_text.append(labels_to_text(y_true[i], inverse_classes=inverse_classes))
-    predicted_text = decode_predict_ctc(out=predicted, top_paths=1, beam_width=5, inverse_classes=inverse_classes)
+    predicted_text = decode_predict_ctc(out=np.random.choice(predicted, 5000), top_paths=1, beam_width=5, inverse_classes=inverse_classes)
     edit_distance_score = edit_distance(predicted_text, true_text)
     print(" [INFO] Edit distances: %s " % (edit_distance_score))

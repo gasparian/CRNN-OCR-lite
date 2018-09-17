@@ -10,8 +10,8 @@ from numpy.random import RandomState
 from PIL import Image, ImageDraw
 from tqdm import tqdm
 
-from keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, \
-                         Dense, Input, Lambda, Bidirectional, ZeroPadding2D, \
+from keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, add, \
+                         Dense, Input, Lambda, Bidirectional, ZeroPadding2D, concatenate, \
                          concatenate, multiply, ReLU, DepthwiseConv2D, TimeDistributed
 #from keras.layers import LSTM, GRU
 from keras.layers import CuDNNLSTM as LSTM
@@ -43,8 +43,9 @@ from keras import backend as K
 ###############################################################################################
 
 # - casual convs: 8857k params; 16 epochs, 500k training examples: ctc_loss - ~0.91
-# - depthwise separable convs and dropouts: 2785k params; 15 epochs, 500k training 
-#   examples: ~1.1 (need more little bit more epochs)
+# - depthwise separable convs and dropouts: 2785k params; 20 epochs, 500k training 
+#   examples; 3181s; 429ms/step; 63592 s.; ctc_loss: ~0.85
+# 
 
 ###############################################################################################
 
@@ -70,6 +71,7 @@ class CRNN:
         self.attention = attention
         self.max_string_len = max_string_len
         self.n_units = n_units
+        self.GRU = GRU
         self.time_dense_size = time_dense_size
         self.single_attention_vector = single_attention_vector
 
@@ -88,26 +90,80 @@ class CRNN:
                 self.pooling_counter_w += 1
         return Dropout(0.1)(x)
 
+    def SGRU(self, go_backwards):
+        input1 = Input(shape=(length, self.time_dense_size), dtype='int32')
+        gru1 = GRU(self.n_units, return_sequences=False, go_backwards=go_backwards)(input1)
+        Encoder1 = Model(input1, gru1)
+
+        input2 = Input(shape=(2, length, self.time_dense_size), dtype='int32')
+        embed2 = TimeDistributed(Encoder1)(input2)
+        gru2 = GRU(self.n_units, return_sequences=False, go_backwards=go_backwards)(embed2)
+        Encoder2 = Model(input2,gru2)
+
+        input3 = Input(shape=(2, 2, length, self.time_dense_size), dtype='int32')
+        embed3 = TimeDistributed(Encoder2)(input3)
+        gru3 = GRU(self.n_units, return_sequences=True, go_backwards=go_backwards)(embed3)
+        return Model(input3, gru3)
+
+    def SLSTM(self, go_backwards):
+        input1 = Input(shape=(2, self.time_dense_size))
+        gru1 = LSTM(self.n_units, return_sequences=False, go_backwards=go_backwards)(input1)
+        Encoder1 = Model(input1, gru1)
+
+        input2 = Input(shape=(2, 2, self.time_dense_size))
+        embed2 = TimeDistributed(Encoder1)(input2)
+        gru2 = LSTM(self.n_units, return_sequences=False, go_backwards=go_backwards)(embed2)
+        Encoder2 = Model(input2,gru2)
+
+        input3 = Input(shape=(2, 2, 13, self.time_dense_size))
+        embed3 = TimeDistributed(Encoder2)(input3)
+        gru3 = LSTM(self.n_units, return_sequences=True, go_backwards=go_backwards)(embed3)
+        return Model(input3, gru3)
+
     def get_model(self):
         self.pooling_counter_h, self.pooling_counter_w = 0, 0
         inputs = Input(name='the_input', shape=self.shape, dtype='float32') #100x32x1
-        x = ZeroPadding2D(padding=(1, 2))(inputs) #102x36x1
+        x = ZeroPadding2D(padding=(2, 2))(inputs) #104x36x1
         x = self.depthwise_conv_block(x, 64, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 128, conv_size=(3, 3), pooling=None)
-        x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=(2, 2))  #51x18x256
+        x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=(2, 2))  #52x18x256
         x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=None)
-        x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=(1, 2))  #51x9x512
+        x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=(1, 2))  #52x9x512
         x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=None)
 
-        conv_to_rnn_dims = ((self.shape[0]+2) // (2 ** self.pooling_counter_h), ((self.shape[1]+4) // (2 ** self.pooling_counter_w)) * 512)
-        x = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(x) #51x4608
-        x = Dense(self.time_dense_size, activation='relu', name='dense1')(x) #51x128
+        conv_to_rnn_dims = ((self.shape[0]+4) // (2 ** self.pooling_counter_h), ((self.shape[1]+4) // (2 ** self.pooling_counter_w)) * 512)
+        x = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(x) #52x4608
+        x = Dense(self.time_dense_size, activation='relu', name='dense1')(x) #52x128 (time_dense_size)
         x = Dropout(0.4)(x)
 
-        #add here bidirectional sliced LSTM
+        # #bidirectional SLICED_LSTM
+        ####################################################################################################################
 
-        if not GRU:    
+        # x = Reshape(target_shape=(13,2,2,self.time_dense_size), name='reshape')(x) #2x2x13x128 (time_dense_size)
+
+        # if self.GRU:
+        #     rnn_1 = self.SRNN(go_backwards=False)(x)
+        #     rnn_1b = self.SRNN(go_backwards=True)(x)
+        #     rnns_1_merged = add([rnn_1, rnn_1b])
+        #     rnn_2 = self.SRNN(go_backwards=False)(rnns_1_merged)
+        #     rnn_2b = self.SRNN(go_backwards=True)(rnns_1_merged)
+        # else:
+        #     rnn_1 = self.SLSTM(go_backwards=False)(x)
+        #     rnn_1b = self.SLSTM(go_backwards=True)(x)
+        #     rnns_1_merged = add([rnn_1, rnn_1b])
+
+        #     print(rnns_1_merged.shape)
+
+        #     rnn_2 = self.SLSTM(go_backwards=False)(rnns_1_merged)
+        #     rnn_2b = self.SLSTM(go_backwards=True)(rnns_1_merged)
+
+        # rnns_2_merged = concatenate([rnn_2, rnn_2b], axis=1)
+        # x = Dropout(0.2)(rnns_2_merged)
+
+        ####################################################################################################################
+
+        if not self.GRU:    
             x = Bidirectional(LSTM(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='sum', weights=None)(x)
             x = Bidirectional(LSTM(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='concat', weights=None)(x)
         else:
@@ -225,7 +281,7 @@ class Readf:
         self.fill = fill
         self.normed = normed
         if self.mjsynth:
-            self.names = open(path+"/imlist.txt", "r").readlines()[:500000]
+            self.names = open(path+"/imlist.txt", "r").readlines()[:1000000] #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
         else:
             self.names = [os.path.join(dp, f) for dp, dn, filenames in os.walk(path) 
                 for f in filenames if re.search('png|jpeg|jpg', f)]
@@ -336,9 +392,9 @@ class Readf:
                             self.flag = True
 
                     if self.flag:
-                        input_length[i] *= (self.img_size[1]) // downsample_factor - 2
+                        input_length[i] = (self.img_size[1]+4) // downsample_factor - 2
                     else:
-                        input_length[i] *= (self.img_size[0]) // downsample_factor - 2
+                        input_length[i] = (self.img_size[0]+4) // downsample_factor - 2
 
                     img = img[:,:,np.newaxis]
 
@@ -398,9 +454,9 @@ class Readf:
                             self.flag = True
 
                     if self.flag:
-                        input_length[i] *= (self.img_size[1]+2) // downsample_factor - 2
+                        input_length[i] = (self.img_size[1]+4) // downsample_factor - 2
                     else:
-                        input_length[i] *= (self.img_size[0]+2) // downsample_factor - 2
+                        input_length[i] = (self.img_size[0]+4) // downsample_factor - 2
 
                     img = cv2.resize(img, self.img_size, Image.LANCZOS)
                     img = cv2.threshold(img, self.trsh, 255,
