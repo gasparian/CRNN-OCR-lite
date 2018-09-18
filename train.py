@@ -159,6 +159,6 @@ if __name__ == '__main__':
     true_text = []
     for i in range(len(y_true)):
         true_text.append(labels_to_text(y_true[i], inverse_classes=inverse_classes))
-    predicted_text = decode_predict_ctc(out=np.random.choice(predicted, 5000), top_paths=1, beam_width=5, inverse_classes=inverse_classes)
+    predicted_text = decode_predict_ctc(out=np.random.choice(np.squeeze(predicted), 5000), top_paths=1, beam_width=5, inverse_classes=inverse_classes)
     edit_distance_score = edit_distance(predicted_text, true_text)
     print(" [INFO] Edit distances: %s " % (edit_distance_score))

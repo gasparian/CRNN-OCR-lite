@@ -692,6 +692,124 @@ class LossHistory(Callback):
         self.losses["loss"].append(logs.get('loss'))
         self.losses["val_loss"].append(logs.get('val_loss'))
 
+##############################################################################################################
+# CLR port from fastai
+
+class LR_Updater(Callback):
+    '''This callback is utilized to log learning rates every iteration (batch cycle)
+    it is not meant to be directly used as a callback but extended by other callbacks
+    ie. LR_Cycle
+    '''
+    def __init__(self, iterations, epochs=1):
+        '''
+        iterations = dataset size / batch size
+        epochs = pass through full training dataset
+        '''
+        self.epoch_iterations = iterations
+        self.trn_iterations = 0.
+        self.history = {}
+    def setRate(self):
+        return K.get_value(self.model.optimizer.lr)
+    def on_train_begin(self, logs={}):
+        self.trn_iterations = 0.
+        logs = logs or {}
+    def on_batch_end(self, batch, logs=None):
+        logs = logs or {}
+        self.trn_iterations += 1
+        K.set_value(self.model.optimizer.lr, self.setRate())
+        self.history.setdefault('lr', []).append(K.get_value(self.model.optimizer.lr))
+        self.history.setdefault('iterations', []).append(self.trn_iterations)
+        for k, v in logs.items():
+            self.history.setdefault(k, []).append(v)
+    def plot_lr(self):
+        plt.xlabel("iterations")
+        plt.ylabel("learning rate")
+        plt.plot(self.history['iterations'], self.history['lr'])
+    def plot(self, n_skip=10):
+        plt.xlabel("learning rate (log scale)")
+        plt.ylabel("loss")
+        plt.plot(self.history['lr'][n_skip:-5], self.history['loss'][n_skip:-5])
+        plt.xscale('log')
+
+class LR_Find(LR_Updater):
+    '''This callback is utilized to determine the optimal lr to be used
+    it is based on this pytorch implementation https://github.com/fastai/fastai/blob/master/fastai/learner.py
+    and adopted from this keras implementation https://github.com/bckenstler/CLR
+    it loosely implements methods described in the paper https://arxiv.org/pdf/1506.01186.pdf
+    '''
+
+    def __init__(self, iterations, epochs=1, min_lr=1e-05, max_lr=10, jump=6):
+        '''
+        iterations = dataset size / batch size
+        epochs should always be 1
+        min_lr is the starting learning rate
+        max_lr is the upper bound of the learning rate
+        jump is the x-fold loss increase that will cause training to stop (defaults to 6)
+        '''
+        self.min_lr = min_lr
+        self.max_lr = max_lr
+        self.lr_mult = (max_lr/min_lr)**(1/iterations)
+        self.jump = jump
+        super().__init__(iterations, epochs=epochs)
+    def setRate(self):
+        return self.min_lr * (self.lr_mult**self.trn_iterations)
+    def on_train_begin(self, logs={}):
+        super().on_train_begin(logs=logs)
+        try: #multiple lr's
+            K.get_variable_shape(self.model.optimizer.lr)[0]
+            self.min_lr = np.full(K.get_variable_shape(self.model.optimizer.lr),self.min_lr)
+        except IndexError:
+            pass
+        K.set_value(self.model.optimizer.lr, self.min_lr)
+        self.best=1e9
+        self.model.save_weights('tmp.hd5') #save weights
+    def on_train_end(self, logs=None):
+        self.model.load_weights('tmp.hd5') #load_weights
+    def on_batch_end(self, batch, logs=None):
+        #check if we have made an x-fold jump in loss and training should stop
+        try:
+            loss = self.history['loss'][-1]
+            if math.isnan(loss) or loss > self.best*self.jump:
+                self.model.stop_training = True
+            if loss < self.best:
+                self.best=loss
+        except KeyError:
+            pass
+        super().on_batch_end(batch, logs=logs)
+        
+class LR_Cycle(LR_Updater):
+    '''This callback is utilized to implement cyclical learning rates
+    it is based on this pytorch implementation https://github.com/fastai/fastai/blob/master/fastai
+    and adopted from this keras implementation https://github.com/bckenstler/CLR
+    it loosely implements methods described in the paper https://arxiv.org/pdf/1506.01186.pdf
+    '''
+    def __init__(self, iterations, cycle_len=1, cycle_mult=1, epochs=1):
+        '''
+        iterations = dataset size / batch size
+        epochs #todo do i need this or can it accessed through self.model
+        cycle_len = num of times learning rate anneals from its max to its min in an epoch
+        cycle_mult = used to increase the cycle length cycle_mult times after every cycle
+        for example: cycle_mult = 2 doubles the length of the cycle at the end of each cy$
+        '''
+        self.min_lr = 0
+        self.cycle_len = cycle_len
+        self.cycle_mult = cycle_mult
+        self.cycle_iterations = 0.
+        super().__init__(iterations, epochs=epochs)
+    def setRate(self):
+        self.cycle_iterations += 1
+        cos_out = np.cos(np.pi*(self.cycle_iterations)/self.epoch_iterations) + 1
+        if self.cycle_iterations==self.epoch_iterations:
+            self.cycle_iterations = 0.
+            self.epoch_iterations *= self.cycle_mult
+        return self.max_lr / 2 * cos_out
+    def on_train_begin(self, logs={}):
+        super().on_train_begin(logs={}) #changed to {} to fix plots after going from 1 to mult. lr
+        self.cycle_iterations = 0.
+        self.max_lr = K.get_value(self.model.optimizer.lr)
+
+##############################################################################################################
+
 class CyclicLR(Callback):
     """This callback implements a cyclical learning rate policy (CLR).
     The method cycles the learning rate between two boundaries with
