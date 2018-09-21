@@ -14,9 +14,9 @@ from tqdm import tqdm
 from keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, add, \
                          Dense, Input, Lambda, Bidirectional, ZeroPadding2D, concatenate, \
                          concatenate, multiply, ReLU, DepthwiseConv2D, TimeDistributed
-#from keras.layers import LSTM, GRU
-from keras.layers import CuDNNLSTM as LSTM
-from keras.layers import CuDNNGRU as GRU
+from keras.layers import LSTM, GRU
+# from keras.layers import CuDNNLSTM as LSTM
+# from keras.layers import CuDNNGRU as GRU
 from keras.layers.core import *
 from keras.layers.normalization import BatchNormalization
 from keras.callbacks import Callback
@@ -279,6 +279,9 @@ def labels_to_text(labels, inverse_classes=None):
 
 def decode_predict_ctc(out=None, top_paths=1, beam_width=3, inverse_classes=None):
     results = []
+    greedy = False
+    if top_paths == 1:
+        greedy = True
     if beam_width < top_paths:
         beam_width = top_paths
     for i in range(out.shape[0]):
@@ -286,17 +289,18 @@ def decode_predict_ctc(out=None, top_paths=1, beam_width=3, inverse_classes=None
         for j in range(top_paths):
             inp = np.expand_dims(out[i], axis=0)
             labels = K.get_value(K.ctc_decode(inp, input_length=np.ones(inp.shape[0])*inp.shape[1],
-                               greedy=False, beam_width=beam_width, top_paths=top_paths)[0][j])[0]
+                               greedy=greedy, beam_width=beam_width, top_paths=top_paths)[0][j])[0]
             text += labels_to_text(labels, inverse_classes)
         results.append(text)
     return results
 
 class Readf:
 
-    def __init__(self, path, img_size=(40,40), trsh=100, normed=False, fill=255, offset=5, mjsynth=False,
-                    random_state=None, length_sort_mode='target', batch_size=32, classes=None):
+    def __init__(self, path, training_file, img_size=(40,40), trsh=100, normed=False, fill=255, offset=5, mjsynth=False,
+                    random_state=None, length_sort_mode='target', batch_size=32, classes=None, reorder=False):
         self.trsh = trsh
         self.mjsynth = mjsynth
+        self.reorder = reorder
         self.path = path
         self.batch_size = batch_size
         self.img_size = img_size
@@ -305,9 +309,10 @@ class Readf:
         self.fill = fill
         self.normed = normed
         if self.mjsynth:
-            self.names = open(path+"/imlist.txt", "r").readlines()[:500000] #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+            #self.names = open(path+'/'+training_file, "r").readlines()[:10000] #<<<
+            self.names = open(path+'/'+training_file, "r").readlines()
         else:
-            self.names = [os.path.join(dp, f) for dp, dn, filenames in os.walk(path) 
+            self.names = [os.path.join(dp, f) for dp, dn, filenames in os.walk(path)
                 for f in filenames if re.search('png|jpeg|jpg', f)]
         self.length = len(self.names)
         self.prng = RandomState(random_state)
@@ -319,18 +324,19 @@ class Readf:
             self.targets = pickle.load(open(self.path+'/target.pickle.dat', 'rb'))
             self.max_len = max([i.shape[0] for i in self.targets.values()])
         else:
-            self.mean, self.std = pickle.load(open(self.path+'/mean_std.pickle.dat', 'rb'))
+            self.mean, self.std = pickle.load(open('./data/mean_std.pickle.dat', 'rb'))
             self.max_len = max(lengths.values())
         self.blank = len(self.classes)
 
         #reorder pictures by ascending of seq./pic length
-        if not self.mjsynth:
-            if length_sort_mode == 'target':
-                self.names = OrderedDict(sorted([(k,len(self.targets[self.parse_name(k)])) for k in self.names], key=operator.itemgetter(1), reverse=False))
-            elif length_sort_mode == 'shape':
-                self.names = OrderedDict(sorted([(k,lengths[self.parse_name(k)]) for k in self.names], key=operator.itemgetter(1), reverse=False))
-        else:
-            self.names = OrderedDict(sorted([(k,lengths[k]) for k in self.names], key=operator.itemgetter(1), reverse=False))
+        if self.reorder:
+            if not self.mjsynth:
+                if length_sort_mode == 'target':
+                    self.names = OrderedDict(sorted([(k,len(self.targets[self.parse_name(k)])) for k in self.names], key=operator.itemgetter(1), reverse=False))
+                elif length_sort_mode == 'shape':
+                    self.names = OrderedDict(sorted([(k,lengths[self.parse_name(k)]) for k in self.names], key=operator.itemgetter(1), reverse=False))
+            else:
+                self.names = OrderedDict(sorted([(k,lengths[k]) for k in self.names], key=operator.itemgetter(1), reverse=False))
 
         print(' [INFO] Reader initialized with params: %s' % ('n_images: %i; '%self.length))
 
@@ -724,10 +730,6 @@ def EMA(data, alpha=0.0002):
             k += 1
     return av
 
-#####################################################################################################################
-# NOT MINE CODE:
-#####################################################################################################################
-
 from tensorflow.python.client import device_lib
 def get_available_gpus():
     local_device_protos = device_lib.list_local_devices()
@@ -813,9 +815,6 @@ class LR_Find(LR_Updater):
             pass
         K.set_value(self.model.optimizer.lr, self.min_lr)
         self.best=1e9
-        self.model.save_weights('/tmp/tmp.hd5') #save weights
-    # def on_train_end(self, logs=None):
-    #     self.model.load_weights('/tmp/tmp.hd5') #load_weights
     def on_batch_end(self, batch, logs=None):
         #check if we have made an x-fold jump in loss and training should stop
         try:
@@ -861,136 +860,6 @@ class LR_Cycle(LR_Updater):
         self.max_lr = K.get_value(self.model.optimizer.lr)
 
 #####################################################################################################################
-
-class CyclicLR(Callback):
-    """This callback implements a cyclical learning rate policy (CLR).
-    The method cycles the learning rate between two boundaries with
-    some constant frequency, as detailed in this paper (https://arxiv.org/abs/1506.01186).
-    The amplitude of the cycle can be scaled on a per-iteration or 
-    per-cycle basis.
-    This class has three built-in policies, as put forth in the paper.
-    "triangular":
-        A basic triangular cycle w/ no amplitude scaling.
-    "triangular2":
-        A basic triangular cycle that scales initial amplitude by half each cycle.
-    "exp_range":
-        A cycle that scales initial amplitude by gamma**(cycle iterations) at each 
-        cycle iteration.
-    For more detail, please see paper.
-    
-    # Example
-        ```python
-            clr = CyclicLR(base_lr=0.001, max_lr=0.006,
-                                step_size=2000., mode='triangular')
-            model.fit(X_train, Y_train, callbacks=[clr])
-        ```
-    
-    Class also supports custom scaling functions:
-        ```python
-            clr_fn = lambda x: 0.5*(1+np.sin(x*np.pi/2.))
-            clr = CyclicLR(base_lr=0.001, max_lr=0.006,
-                                step_size=2000., scale_fn=clr_fn,
-                                scale_mode='cycle')
-            model.fit(X_train, Y_train, callbacks=[clr])
-        ```    
-    # Arguments
-        base_lr: initial learning rate which is the
-            lower boundary in the cycle.
-        max_lr: upper boundary in the cycle. Functionally,
-            it defines the cycle amplitude (max_lr - base_lr).
-            The lr at any cycle is the sum of base_lr
-            and some scaling of the amplitude; therefore 
-            max_lr may not actually be reached depending on
-            scaling function.
-        step_size: number of training iterations per
-            half cycle. Authors suggest setting step_size
-            2-8 x training iterations in epoch.
-        mode: one of {triangular, triangular2, exp_range}.
-            Default 'triangular'.
-            Values correspond to policies detailed above.
-            If scale_fn is not None, this argument is ignored.
-        gamma: constant in 'exp_range' scaling function:
-            gamma**(cycle iterations)
-        scale_fn: Custom scaling policy defined by a single
-            argument lambda function, where 
-            0 <= scale_fn(x) <= 1 for all x >= 0.
-            mode paramater is ignored 
-        scale_mode: {'cycle', 'iterations'}.
-            Defines whether scale_fn is evaluated on 
-            cycle number or cycle iterations (training
-            iterations since start of cycle). Default is 'cycle'.
-    """
-
-    def __init__(self, base_lr=0.001, max_lr=0.006, step_size=2000., mode='triangular',
-                 gamma=1., scale_fn=None, scale_mode='cycle'):
-        super(CyclicLR, self).__init__()
-
-        self.base_lr = base_lr
-        self.max_lr = max_lr
-        self.step_size = step_size
-        self.mode = mode
-        self.gamma = gamma
-        if scale_fn == None:
-            if self.mode == 'triangular':
-                self.scale_fn = lambda x: 1.
-                self.scale_mode = 'cycle'
-            elif self.mode == 'triangular2':
-                self.scale_fn = lambda x: 1/(2.**(x-1))
-                self.scale_mode = 'cycle'
-            elif self.mode == 'exp_range':
-                self.scale_fn = lambda x: gamma**(x)
-                self.scale_mode = 'iterations'
-        else:
-            self.scale_fn = scale_fn
-            self.scale_mode = scale_mode
-        self.clr_iterations = 0.
-        self.trn_iterations = 0.
-        self.history = {}
-
-        self._reset()
-
-    def _reset(self, new_base_lr=None, new_max_lr=None,
-               new_step_size=None):
-        """Resets cycle iterations.
-        Optional boundary/step size adjustment.
-        """
-        if new_base_lr != None:
-            self.base_lr = new_base_lr
-        if new_max_lr != None:
-            self.max_lr = new_max_lr
-        if new_step_size != None:
-            self.step_size = new_step_size
-        self.clr_iterations = 0.
-        
-    def clr(self):
-        cycle = np.floor(1+self.clr_iterations/(2*self.step_size))
-        x = np.abs(self.clr_iterations/self.step_size - 2*cycle + 1)
-        if self.scale_mode == 'cycle':
-            return self.base_lr + (self.max_lr-self.base_lr)*np.maximum(0, (1-x))*self.scale_fn(cycle)
-        else:
-            return self.base_lr + (self.max_lr-self.base_lr)*np.maximum(0, (1-x))*self.scale_fn(self.clr_iterations)
-        
-    def on_train_begin(self, logs={}):
-        logs = logs or {}
-
-        if self.clr_iterations == 0:
-            K.set_value(self.model.optimizer.lr, self.base_lr)
-        else:
-            K.set_value(self.model.optimizer.lr, self.clr())        
-            
-    def on_batch_end(self, epoch, logs=None):
-        
-        logs = logs or {}
-        self.trn_iterations += 1
-        self.clr_iterations += 1
-
-        self.history.setdefault('lr', []).append(K.get_value(self.model.optimizer.lr))
-        self.history.setdefault('iterations', []).append(self.trn_iterations)
-
-        for k, v in logs.items():
-            self.history.setdefault(k, []).append(v)
-        
-        K.set_value(self.model.optimizer.lr, self.clr())
 
 #ATTENTION LAYER
 def get_activations(model, inputs, print_shape_only=False, layer_name=None):

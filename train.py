@@ -22,10 +22,16 @@ from utils import *
 
 if __name__ == '__main__':
 
-    #python3 train.py --path /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --save_path /data/OCR/data --model_name OCR_ver10 --nbepochs 15 --norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --cyclic_lr
+    # docker build -t crnn_ocr:latest -f Dockerfile .
+    # nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data -v /data/OCR/data:/save_path -p 8000:8000 crnn_ocr
+
+    # python3 train.py --G 1 --path /input_data --training_fname imlist.txt --save_path /save_path --model_name CRNN_OCR_model --nbepochs 20 --norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --cyclic_lr
+    # python3 train.py --G 1 --path /input_data --training_fname annotation_train.txt --val_fname annotation_test.txt --save_path /save_path --model_name OCR_ver11 --nbepochs 20 --norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --cyclic_lr
 
     parser = argparse.ArgumentParser(description='crnn_ctc_loss')
     parser.add_argument('-p', '--path', type=str, required=True)
+    parser.add_argument('--training_fname', type=str, required=True)
+    parser.add_argument('--val_fname', type=str, required=False, default="")
     parser.add_argument('--save_path', type=str, required=True)
     parser.add_argument('--model_name', type=str, required=True)
     parser.add_argument('--nbepochs', type=int, default=20)
@@ -49,6 +55,8 @@ if __name__ == '__main__':
     parser.add_argument('--attention', action='store_true')
     parser.add_argument('--GRU', action='store_true')
     parser.add_argument('--cyclic_lr', action='store_true')
+    parser.add_argument('--reorder', action='store_true')
+    parser.add_argument('--non_intersecting_chars', action='store_true')
     args = parser.parse_args()
     globals().update(vars(args))
 
@@ -63,31 +71,34 @@ if __name__ == '__main__':
 
     print("[INFO] GPU devices:%s" % get_available_gpus())
 
-    """
-    "Non-intersecting" letters: AaBbDdEeFfGgHhLlMmNnQqRrTt
-    """
-    lexicon = [i for i in '0123456789'+string.ascii_lowercase+'-']
+    if non_intersecting_chars:
+        lexicon = list(set([i for i in '0123456789'+string.ascii_lowercase+'AaBbDdEeFfGgHhLlMmNnQqRrTt'+'-']))
+    else:
+        lexicon = [i for i in '0123456789'+string.ascii_lowercase+'-']
     #lexicon = [i for i in string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation+' ']
+
     classes = {j:i for i, j in enumerate(lexicon)}
     inverse_classes = {v:k for k, v in classes.items()}
     print(" [INFO] %s" % classes)
 
-    img_size = (imgh, imgW)
+    img_size = (imgh, imgW) + (1,)
     reader = Readf(
-        path, img_size=img_size, trsh=trsh, normed=norm,
+        path, training_fname, img_size=img_size, trsh=trsh, normed=norm,
         mjsynth=mjsynth, offset=offset, fill=fill, random_state=random_state, 
-        length_sort_mode=length_sort_mode, classes=classes
+        length_sort_mode=length_sort_mode, classes=classes, reorder=reorder
     )
+    if reorder:
+        train = np.array(list(reader.names.keys()))
+    else:
+        train = np.array(reader.names)
 
-    img_size = img_size+(1,)
-    names = np.array(list(reader.names.keys()))
-    rndm = RandomState(random_state)
-    length = len(names)
+    if val_fname:
+        val = np.array(open(path+'/'+val_fname, "r").readlines())
 
-    train_indeces = rndm.choice(range(len(names)), size=int(length*train_portion), replace=False)
-    #train = names[np.sort(train_indeces)] #sort or not?
-    train = names[train_indeces]
-    val = names[[i for i in range(len(names)) if i not in train_indeces]]
+    else:
+        length = len(train)
+        train, val = train[:int(length*train_portion)], train[int(length*train_portion):]
+
     train_steps = len(train) // batch_size
     if (len(train) % batch_size) > 0:
         train_steps += 1
@@ -131,10 +142,6 @@ if __name__ == '__main__':
     multi_model.compile(loss={"ctc": lambda y_true, y_pred: y_pred}, optimizer=optimizer)
     checkpointer = ModelCheckpoint(filepath=save_path+'/%s/checkpoint_weights.h5'%model_name, verbose=1, 
                                save_best_only=True, save_weights_only=True)
-    # metric = EditDistances(
-    #     inverse_classes=inverse_classes, 
-    #     validation_data=(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h), reader.get_labels(val)),
-    #     validation_steps=test_steps)
 
     if cyclic_lr:
 
@@ -186,13 +193,14 @@ if __name__ == '__main__':
         save_single_model(name)
     print(" [INFO] Models and history saved! ")
 
-    print(" [INFO] Computing edit distance metric with the best model...")
+    print(" [INFO] Computing edit distance metric with the best model... ")
     model = load_model_custom(save_path+"/"+model_name, weights="checkpoint_weights")
     model = init_predictor(model)
+    indeces = np.random.randint(0, len(val), 10000)
     predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h), steps=test_steps*2)
     y_true = reader.get_labels(val)
-    true_text = [labels_to_text(y_true[i], inverse_classes=inverse_classes) for i in range(len(y_true))]
-    predicted_text = decode_predict_ctc(out=predicted[np.random.randint(0, len(predicted), 50000)], top_paths=1, beam_width=3, inverse_classes=inverse_classes)
+    true_text = [labels_to_text(y_true[i], inverse_classes=inverse_classes) for i in range(len(y_true[indeces]))]
+    predicted_text = decode_predict_ctc(out=predicted[indeces], top_paths=1, beam_width=3, inverse_classes=inverse_classes)
     edit_distance_score = edit_distance(predicted_text, true_text)
     normalized_edit_distance_score = normalized_edit_distance(predicted_text, true_text)
     print(" [INFO] mean edit distance: %f ; normalized edit distance score: %f" % (edit_distance_score, normalized_edit_distance_score))
