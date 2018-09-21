@@ -3,6 +3,7 @@ import pickle
 import glob
 import string
 import time
+import math
 import argparse
 from shutil import copyfile, rmtree
 
@@ -14,12 +15,14 @@ import tensorflow as tf
 from keras import backend as K
 from keras.callbacks import ModelCheckpoint
 from keras.utils.training_utils import multi_gpu_model
+from keras.models import load_model, clone_model
+from keras.layers import Lambda
 
 from utils import *
 
 if __name__ == '__main__':
 
-    #python3 train.py --path /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --save_path /data/OCR/data --model_name OCR_ver6 --nbepochs 10 --norm --mjsynth --opt sgd --time_dense_size 128
+    #python3 train.py --path /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --save_path /data/OCR/data --model_name OCR_ver10 --nbepochs 15 --norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --cyclic_lr
 
     parser = argparse.ArgumentParser(description='crnn_ctc_loss')
     parser.add_argument('-p', '--path', type=str, required=True)
@@ -40,12 +43,12 @@ if __name__ == '__main__':
     parser.add_argument('--n_units', type=int, default=256)
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--opt', type=str, default="sgd")
-    parser.add_argument('--max_lr', type=float, default=0.006)
+    parser.add_argument('--max_lr', type=float, default=0.008)
     parser.add_argument('--norm', action='store_true')
     parser.add_argument('--mjsynth', action='store_true')
     parser.add_argument('--attention', action='store_true')
     parser.add_argument('--GRU', action='store_true')
-    parser.add_argument('--cyclic_RL', action='store_true')
+    parser.add_argument('--cyclic_lr', action='store_true')
     args = parser.parse_args()
     globals().update(vars(args))
 
@@ -57,15 +60,11 @@ if __name__ == '__main__':
     with open(save_path+'/'+model_name+"/arguments.txt", "w") as f:
         f.write(str(args))
     globals().update(vars(args))
-    if opt == "adam":
-        optimizer = optimizers.Adam(lr=0.002, beta_1=0.5, beta_2=0.999, clipnorm=5)
-    elif opt == "sgd":
-        optimizer = optimizers.SGD(lr=0.002, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
 
     print("[INFO] GPU devices:%s" % get_available_gpus())
 
     """
-    Non-intersecting letters: AaBbDdEeFfGgHhLlMmNnQqRrTt
+    "Non-intersecting" letters: AaBbDdEeFfGgHhLlMmNnQqRrTt
     """
     lexicon = [i for i in '0123456789'+string.ascii_lowercase+'-']
     #lexicon = [i for i in string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation+' ']
@@ -104,8 +103,8 @@ if __name__ == '__main__':
 
     if G <= 1:
         print("[INFO] training with 1 GPU...")
-        model = init_model.get_model()
-        model_json = model.to_json()
+        multi_model = init_model.get_model()
+        model_json = multi_model.to_json()
         with open(save_path+"/"+model_name+"/model.json", "w") as json_file:
             json_file.write(model_json)
     else:
@@ -115,50 +114,85 @@ if __name__ == '__main__':
             model = init_model.get_model()
         multi_model = multi_gpu_model(model, gpus=G)
 
-    model.compile(optimizer=optimizer, loss={"ctc": lambda y_true, y_pred: y_pred})
-    model.summary()
-
     start_time = time.time()
 
-    model_json = model.to_json()
+    model_json = multi_model.to_json()
     with open(save_path+'/'+model_name+"/model.json", "w") as json_file:
         json_file.write(model_json)
     with open(save_path+'/'+model_name + '/model_summary.txt','w') as f:
-        model.summary(print_fn=lambda x: f.write(x + '\n'))
+        multi_model.summary(print_fn=lambda x: f.write(x + '\n'))
 
-    cb_list = []
+    multi_model.summary()
+
+    if opt == "adam":
+        optimizer = optimizers.Adam(lr=max_lr, beta_1=0.5, beta_2=0.999, clipnorm=5)
+    elif opt == "sgd":
+        optimizer = optimizers.SGD(lr=max_lr, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
+    multi_model.compile(loss={"ctc": lambda y_true, y_pred: y_pred}, optimizer=optimizer)
     checkpointer = ModelCheckpoint(filepath=save_path+'/%s/checkpoint_weights.h5'%model_name, verbose=1, 
-                                   save_best_only=True, save_weights_only=True)
-    cb_list.append(checkpointer)
-    if cyclic_RL:
-        clr = CyclicLR(base_lr=0.001, max_lr=max_lr, step_size=train_steps*2, mode='triangular')
-        cb_list.append(clr)
+                               save_best_only=True, save_weights_only=True)
+    # metric = EditDistances(
+    #     inverse_classes=inverse_classes, 
+    #     validation_data=(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h), reader.get_labels(val)),
+    #     validation_steps=test_steps)
 
-    H = model.fit_generator(generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),
-                steps_per_epoch=train_steps,
-                epochs=nbepochs,
-                validation_data=reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h),
-                validation_steps=test_steps,
-                shuffle=False, verbose=1,
-                callbacks=cb_list)
+    if cyclic_lr:
+
+        lr_finder = LR_Find(train_steps, min_lr=1e-5, max_lr=1, jump=2)
+        multi_model.fit_generator(
+            reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),
+            steps_per_epoch=train_steps,
+            epochs=1, callbacks=[lr_finder]
+        )
+
+        max_lr = lr_finder.max_lr
+        print("\n [INFO] Maximum learning rate: %s"%max_lr)
+        lr_finder.history.update({"max_lr":max_lr})
+        pickle.dump(lr_finder.history, open(save_path+'/'+model_name+'/lr_finder_history.pickle.dat', 'wb'))
+
+        K.set_value(multi_model.optimizer.lr, max_lr)
+        clr = LR_Cycle(train_steps, cycle_len=1, cycle_mult=2, epochs=nbepochs)
+        H = multi_model.fit_generator(
+            generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),
+            steps_per_epoch=train_steps,
+            epochs=nbepochs,
+            validation_data=reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h),
+            validation_steps=test_steps,
+            shuffle=False, 
+            verbose=1,
+            callbacks=[checkpointer, clr])
+        pickle.dump(clr.history, open(save_path+'/'+model_name+'/cycling_lr_history.pickle.dat', 'wb'))
+
+    else:
+
+        H = multi_model.fit_generator(
+            generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),
+            steps_per_epoch=train_steps,
+            epochs=nbepochs,
+            validation_data=reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h),
+            validation_steps=test_steps,
+            shuffle=False, verbose=1,
+            callbacks=[checkpointer]
+        )
+
+    pickle.dump(H.history, open(save_path+'/'+model_name+'/loss_history.pickle.dat', 'wb'))
+
     print(" [INFO] Training finished in %i sec.!" % (time.time() - start_time))
 
-    model.save_weights(save_path+'/'+model_name+"/final_weights.h5")
-    model.save(save_path+'/'+model_name+"/final_model.h5")
+    multi_model.save_weights(save_path+'/'+model_name+"/final_weights.h5")
+    multi_model.save(save_path+'/'+model_name+"/final_model.h5")
     if G > 1:
         #save "single" model graph and weights
         save_single_model(name)
-    pickle.dump(H.history, open(save_path+'/'+model_name+'/loss_history.pickle.dat', 'wb'))
+    print(" [INFO] Models and history saved! ")
 
     print(" [INFO] Computing edit distance metric with the best model...")
     model = load_model_custom(save_path+"/"+model_name, weights="checkpoint_weights")
     model = init_predictor(model)
     predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h), steps=test_steps*2)
-
     y_true = reader.get_labels(val)
-    true_text = []
-    for i in range(len(y_true)):
-        true_text.append(labels_to_text(y_true[i], inverse_classes=inverse_classes))
-    predicted_text = decode_predict_ctc(out=np.random.choice(np.squeeze(predicted), 5000), top_paths=1, beam_width=5, inverse_classes=inverse_classes)
+    true_text = [labels_to_text(y_true[i], inverse_classes=inverse_classes) for i in range(len(y_true))]
+    predicted_text = decode_predict_ctc(out=predicted[np.random.randint(0, len(predicted), 50000)], top_paths=1, beam_width=3, inverse_classes=inverse_classes)
     edit_distance_score = edit_distance(predicted_text, true_text)
-    print(" [INFO] Edit distances: %s " % (edit_distance_score))
+    normalized_edit_distance_score = normalized_edit_distance(predicted_text, true_text)
+    print(" [INFO] mean edit distance: %f ; normalized edit distance score: %f" % (edit_distance_score, normalized_edit_distance_score))

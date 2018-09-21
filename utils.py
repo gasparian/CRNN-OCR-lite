@@ -2,6 +2,7 @@ import os
 import re
 import pickle
 import operator 
+import math
 from collections import OrderedDict
 
 import cv2
@@ -221,14 +222,40 @@ def levenshtein(seq1, seq2):
     return (matrix[size_x - 1, size_y - 1])
 
 def edit_distance(y_pred, y_true):
-    c = {}
+    mean_distance, length = 0, len(y_true)
     for y0, y in zip(y_pred, y_true):
-        distance = levenshtein(y0, y)
-        if distance not in c.keys():
-            c[distance] = 1
-        c[distance] += 1
-    c = {k:v/len(y_true) for k, v in c.items()}
-    return c
+        mean_distance += levenshtein(y0, y) / length
+    return mean_distance
+
+def normalized_edit_distance(y_pred, y_true):
+    mean_distance, length = 0, len(y_true)
+    for y0, y in zip(y_pred, y_true):
+        mean_distance += levenshtein(y0, y) / (len(y) * length)
+    return mean_distance
+
+class EditDistances(Callback):
+
+    def __init__(self, inverse_classes, validation_data, validation_steps):
+        self.validation_data = validation_data
+        self.validation_steps = validation_steps
+        self.inverse_classes = inverse_classes
+
+    def on_train_begin(self, logs={}):
+        self.edit_distance = []
+        self.normalized_edit_distance = []
+
+    def on_epoch_end(self, epoch, logs={}):
+        predictor = init_predictor(self.model)
+        val_predict = predictor.predict_generator(self.validation_data[0], steps=self.validation_steps*2)
+        val_predict = decode_predict_ctc(out=val_predict, top_paths=1, beam_width=3, inverse_classes=self.inverse_classes)
+        targ = [labels_to_text(t, inverse_classes=self.inverse_classes) for t in self.validation_data[1]]
+        val_edit_distance = edit_distance(val_predict, targ)
+        val_normalized_edit_distance = normalized_edit_distance(val_predict, targ)
+        self.edit_distance.append(val_edit_distance)
+        self.normalized_edit_distance.append(val_normalized_edit_distance)
+        print(" — val_edit_distance: %f — val_normalized_edit_distance %f" % (val_edit_distance, val_normalized_edit_distance))
+
+        return
 
 def load_model_custom(path, weights="model"):
     json_file = open(path+'/model.json', 'r')
@@ -250,14 +277,11 @@ def labels_to_text(labels, inverse_classes=None):
             ret.append(str(inverse_classes[c]))
     return "".join(ret)
 
-def decode_predict_ctc(out=None, a=None, predictor=None, top_paths=1, beam_width=5, inverse_classes=None):
-    if out is None:
-        c = np.expand_dims(a.T, axis=0)
-        out = predictor.predict(c)
+def decode_predict_ctc(out=None, top_paths=1, beam_width=3, inverse_classes=None):
     results = []
     if beam_width < top_paths:
         beam_width = top_paths
-    for i in tqdm(range(out.shape[0])):
+    for i in range(out.shape[0]):
         text = ""
         for j in range(top_paths):
             inp = np.expand_dims(out[i], axis=0)
@@ -281,7 +305,7 @@ class Readf:
         self.fill = fill
         self.normed = normed
         if self.mjsynth:
-            self.names = open(path+"/imlist.txt", "r").readlines()[:1000000] #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+            self.names = open(path+"/imlist.txt", "r").readlines()[:500000] #<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
         else:
             self.names = [os.path.join(dp, f) for dp, dn, filenames in os.walk(path) 
                 for f in filenames if re.search('png|jpeg|jpg', f)]
@@ -675,6 +699,31 @@ def save_single_model(path):
         json_file.write(model_json)
     sinlge_model.save_weights(path+"/single_gpu_weights.h5")
 
+def SMA(data, dt=1, ave_t=100):
+    m = data.shape[0]
+    ave = int(ave_t / dt)
+    data_ave = np.empty((data.shape))[ave_t:]
+    for i, j in enumerate(range(ave, m)):
+        data_ave[i] = np.nansum(data[(j - ave):j], axis=0) / ave
+    return data_ave
+
+def EMA(data, alpha=0.0002):
+    k = 1
+    length = data.shape[0]
+    if data.ndim > 1: 
+        av = np.empty((length, data.shape[1]))
+        av[0, :] = data[0, :]
+        while k < length:
+            av[k, :] = av[k-1, :] + alpha * (data[k] - av[k-1, :])
+            k += 1
+    else:
+        av = np.empty((length,)) 
+        av[0] = data[0]
+        while k < length:
+            av[k] = av[k-1] + alpha * (data[k] - av[k-1])
+            k += 1
+    return av
+
 #####################################################################################################################
 # NOT MINE CODE:
 #####################################################################################################################
@@ -692,8 +741,10 @@ class LossHistory(Callback):
         self.losses["loss"].append(logs.get('loss'))
         self.losses["val_loss"].append(logs.get('val_loss'))
 
-##############################################################################################################
-# CLR port from fastai
+#####################################################################################################################
+# keras-CLR port from fastai
+# https://github.com/metachi/fastaiv2keras
+#####################################################################################################################
 
 class LR_Updater(Callback):
     '''This callback is utilized to log learning rates every iteration (batch cycle)
@@ -762,14 +813,15 @@ class LR_Find(LR_Updater):
             pass
         K.set_value(self.model.optimizer.lr, self.min_lr)
         self.best=1e9
-        self.model.save_weights('tmp.hd5') #save weights
-    def on_train_end(self, logs=None):
-        self.model.load_weights('tmp.hd5') #load_weights
+        self.model.save_weights('/tmp/tmp.hd5') #save weights
+    # def on_train_end(self, logs=None):
+    #     self.model.load_weights('/tmp/tmp.hd5') #load_weights
     def on_batch_end(self, batch, logs=None):
         #check if we have made an x-fold jump in loss and training should stop
         try:
             loss = self.history['loss'][-1]
             if math.isnan(loss) or loss > self.best*self.jump:
+                self.max_lr = K.get_value(self.model.optimizer.lr)
                 self.model.stop_training = True
             if loss < self.best:
                 self.best=loss
@@ -808,7 +860,7 @@ class LR_Cycle(LR_Updater):
         self.cycle_iterations = 0.
         self.max_lr = K.get_value(self.model.optimizer.lr)
 
-##############################################################################################################
+#####################################################################################################################
 
 class CyclicLR(Callback):
     """This callback implements a cyclical learning rate policy (CLR).
