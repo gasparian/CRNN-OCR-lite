@@ -28,5 +28,5 @@ FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
 RUN apt-get update && apt-get install -y --allow-downgrades --allow-change-held-packages --no-install-recommends \
     libcudnn7=7.0.5.15-1+cuda9.0 \
     libcudnn7-dev=7.0.5.15-1+cuda9.0 && \
-rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/*
 ```
