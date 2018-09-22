@@ -12,7 +12,7 @@ nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px
 
 Now you're ready to train the model:
 ```
-python3 train.py --G 1 --path /input_data --training_fname imlist.txt --save_path /save_path --model_name CRNN_OCR_model --nbepochs 20 --norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --cyclic_lr
+python3 train.py --G 1 --path /input_data --training_fname annotation_train.txt --val_fname annotation_test.txt --save_path /save_path --model_name OCR_ver11 --nbepochs 20 --norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --cyclic_lr
 ```
 
 ## Issues
