@@ -33,7 +33,7 @@ from keras import backend as K
 # https://github.com/keras-team/keras/blob/master/examples/image_ocr.py
 # https://github.com/keras-team/keras-applications/blob/master/keras_applications/mobilenet.py
 #
-# Slices RNN:
+# Sliced RNN:
 # https://github.com/zepingyu0512/srnn/blob/master/SRNN.py
 #
 # Attention block:
@@ -57,8 +57,6 @@ from keras import backend as K
 # - add bidirectional sliced lstm to make net much more faster;
 # - problem with N batches in inference mode - why it's need to multiply by 2 the 
 # number of steps?;
-# - get distribution on word length on test set;
-# - create custom metric for levenstein distances <= 1;
 
 ###############################################################################################
 
@@ -91,36 +89,6 @@ class CRNN:
                 self.pooling_counter_w += 1
         return Dropout(0.1)(x)
 
-    def SGRU(self, go_backwards):
-        input1 = Input(shape=(length, self.time_dense_size), dtype='int32')
-        gru1 = GRU(self.n_units, return_sequences=False, go_backwards=go_backwards)(input1)
-        Encoder1 = Model(input1, gru1)
-
-        input2 = Input(shape=(2, length, self.time_dense_size), dtype='int32')
-        embed2 = TimeDistributed(Encoder1)(input2)
-        gru2 = GRU(self.n_units, return_sequences=False, go_backwards=go_backwards)(embed2)
-        Encoder2 = Model(input2,gru2)
-
-        input3 = Input(shape=(2, 2, length, self.time_dense_size), dtype='int32')
-        embed3 = TimeDistributed(Encoder2)(input3)
-        gru3 = GRU(self.n_units, return_sequences=True, go_backwards=go_backwards)(embed3)
-        return Model(input3, gru3)
-
-    def SLSTM(self, go_backwards):
-        input1 = Input(shape=(2, self.time_dense_size))
-        gru1 = LSTM(self.n_units, return_sequences=False, go_backwards=go_backwards)(input1)
-        Encoder1 = Model(input1, gru1)
-
-        input2 = Input(shape=(2, 2, self.time_dense_size))
-        embed2 = TimeDistributed(Encoder1)(input2)
-        gru2 = LSTM(self.n_units, return_sequences=False, go_backwards=go_backwards)(embed2)
-        Encoder2 = Model(input2,gru2)
-
-        input3 = Input(shape=(2, 2, 13, self.time_dense_size))
-        embed3 = TimeDistributed(Encoder2)(input3)
-        gru3 = LSTM(self.n_units, return_sequences=True, go_backwards=go_backwards)(embed3)
-        return Model(input3, gru3)
-
     def get_model(self):
         self.pooling_counter_h, self.pooling_counter_w = 0, 0
         inputs = Input(name='the_input', shape=self.shape, dtype='float32') #100x32x1
@@ -137,32 +105,6 @@ class CRNN:
         x = Reshape(target_shape=conv_to_rnn_dims, name='reshape')(x) #52x4608
         x = Dense(self.time_dense_size, activation='relu', name='dense1')(x) #52x128 (time_dense_size)
         x = Dropout(0.4)(x)
-
-        # #bidirectional SLICED_LSTM
-        ####################################################################################################################
-
-        # x = Reshape(target_shape=(13,2,2,self.time_dense_size), name='reshape')(x) #2x2x13x128 (time_dense_size)
-
-        # if self.GRU:
-        #     rnn_1 = self.SRNN(go_backwards=False)(x)
-        #     rnn_1b = self.SRNN(go_backwards=True)(x)
-        #     rnns_1_merged = add([rnn_1, rnn_1b])
-        #     rnn_2 = self.SRNN(go_backwards=False)(rnns_1_merged)
-        #     rnn_2b = self.SRNN(go_backwards=True)(rnns_1_merged)
-        # else:
-        #     rnn_1 = self.SLSTM(go_backwards=False)(x)
-        #     rnn_1b = self.SLSTM(go_backwards=True)(x)
-        #     rnns_1_merged = add([rnn_1, rnn_1b])
-
-        #     print(rnns_1_merged.shape)
-
-        #     rnn_2 = self.SLSTM(go_backwards=False)(rnns_1_merged)
-        #     rnn_2b = self.SLSTM(go_backwards=True)(rnns_1_merged)
-
-        # rnns_2_merged = concatenate([rnn_2, rnn_2b], axis=1)
-        # x = Dropout(0.2)(rnns_2_merged)
-
-        ####################################################################################################################
 
         if not self.GRU:    
             x = Bidirectional(LSTM(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='sum', weights=None)(x)

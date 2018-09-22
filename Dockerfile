@@ -7,7 +7,14 @@
 # + opencv         3.4.2 (git)
 # ==================================================================
 
-FROM nvidia/cuda:9.2-runtime-ubuntu16.04
+FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
+
+RUN apt-get update && apt-get install -y --allow-downgrades --allow-change-held-packages --no-install-recommends \
+    libcudnn7=7.0.5.15-1+cuda9.0 \
+    libcudnn7-dev=7.0.5.15-1+cuda9.0 && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update
 
 RUN export DEBIAN_FRONTEND=noninteractive \
     APT_INSTALL="apt-get install -y --no-install-recommends" && \
