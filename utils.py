@@ -62,8 +62,7 @@ from keras import backend as K
 
 class CRNN:
 
-    def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), attention=False, time_dense_size=128,
-                       GRU=False, n_units=256, single_attention_vector=True):
+    def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), time_dense_size=128, GRU=False, n_units=256):
 
         self.num_classes = num_classes
         self.shape = shape
@@ -113,9 +112,6 @@ class CRNN:
             x = Bidirectional(GRU(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='sum', weights=None)(x)
             x = Bidirectional(GRU(self.n_units, return_sequences=True, kernel_initializer='he_normal'), merge_mode='concat', weights=None)(x)
         x = Dropout(0.2)(x)
-
-        if self.attention:
-            x = attention_3d_block(x, time_steps=conv_to_rnn_dims[0], single_attention_vector=self.single_attention_vector)
 
         x_ctc = Dense(self.num_classes, kernel_initializer='he_normal', name='dense2')(x)
         y_pred = Activation('softmax', name='softmax')(x_ctc)
@@ -804,58 +800,58 @@ class LR_Cycle(LR_Updater):
 #####################################################################################################################
 
 #ATTENTION LAYER
-def get_activations(model, inputs, print_shape_only=False, layer_name=None):
-    # Documentation is available online on Github at the address below.
-    # From: https://github.com/philipperemy/keras-visualize-activations
-    print('----- activations -----')
-    activations = []
-    inp = model.input
-    if layer_name is None:
-        outputs = [layer.output for layer in model.layers]
-    else:
-        outputs = [layer.output for layer in model.layers if layer.name == layer_name]  # all layer outputs
-    funcs = [K.function([inp] + [K.learning_phase()], [out]) for out in outputs]  # evaluation functions
-    layer_outputs = [func([inputs, 1.])[0] for func in funcs]
-    for layer_activations in layer_outputs:
-        activations.append(layer_activations)
-        if print_shape_only:
-            print(layer_activations.shape)
-        else:
-            print(layer_activations)
-    return activations
+# def get_activations(model, inputs, print_shape_only=False, layer_name=None):
+#     # Documentation is available online on Github at the address below.
+#     # From: https://github.com/philipperemy/keras-visualize-activations
+#     print('----- activations -----')
+#     activations = []
+#     inp = model.input
+#     if layer_name is None:
+#         outputs = [layer.output for layer in model.layers]
+#     else:
+#         outputs = [layer.output for layer in model.layers if layer.name == layer_name]  # all layer outputs
+#     funcs = [K.function([inp] + [K.learning_phase()], [out]) for out in outputs]  # evaluation functions
+#     layer_outputs = [func([inputs, 1.])[0] for func in funcs]
+#     for layer_activations in layer_outputs:
+#         activations.append(layer_activations)
+#         if print_shape_only:
+#             print(layer_activations.shape)
+#         else:
+#             print(layer_activations)
+#     return activations
 
 
-def get_data(n, input_dim, attention_column=1):
-    """
-    Data generation. x is purely random except that it's first value equals the target y.
-    In practice, the network should learn that the target = x[attention_column].
-    Therefore, most of its attention should be focused on the value addressed by attention_column.
-    :param n: the number of samples to retrieve.
-    :param input_dim: the number of dimensions of each element in the series.
-    :param attention_column: the column linked to the target. Everything else is purely random.
-    :return: x: model inputs, y: model targets
-    """
-    x = np.random.standard_normal(size=(n, input_dim))
-    y = np.random.randint(low=0, high=2, size=(n, 1))
-    x[:, attention_column] = y[:, 0]
-    return x, y
+# def get_data(n, input_dim, attention_column=1):
+#     """
+#     Data generation. x is purely random except that it's first value equals the target y.
+#     In practice, the network should learn that the target = x[attention_column].
+#     Therefore, most of its attention should be focused on the value addressed by attention_column.
+#     :param n: the number of samples to retrieve.
+#     :param input_dim: the number of dimensions of each element in the series.
+#     :param attention_column: the column linked to the target. Everything else is purely random.
+#     :return: x: model inputs, y: model targets
+#     """
+#     x = np.random.standard_normal(size=(n, input_dim))
+#     y = np.random.randint(low=0, high=2, size=(n, 1))
+#     x[:, attention_column] = y[:, 0]
+#     return x, y
 
 
-def get_data_recurrent(n, time_steps, input_dim, attention_column=10):
-    """
-    Data generation. x is purely random except that it's first value equals the target y.
-    In practice, the network should learn that the target = x[attention_column].
-    Therefore, most of its attention should be focused on the value addressed by attention_column.
-    :param n: the number of samples to retrieve.
-    :param time_steps: the number of time steps of your series.
-    :param input_dim: the number of dimensions of each element in the series.
-    :param attention_column: the column linked to the target. Everything else is purely random.
-    :return: x: model inputs, y: model targets
-    """
-    x = np.random.standard_normal(size=(n, time_steps, input_dim))
-    y = np.random.randint(low=0, high=2, size=(n, 1))
-    x[:, attention_column, :] = np.tile(y[:], (1, input_dim))
-    return x, y
+# def get_data_recurrent(n, time_steps, input_dim, attention_column=10):
+#     """
+#     Data generation. x is purely random except that it's first value equals the target y.
+#     In practice, the network should learn that the target = x[attention_column].
+#     Therefore, most of its attention should be focused on the value addressed by attention_column.
+#     :param n: the number of samples to retrieve.
+#     :param time_steps: the number of time steps of your series.
+#     :param input_dim: the number of dimensions of each element in the series.
+#     :param attention_column: the column linked to the target. Everything else is purely random.
+#     :return: x: model inputs, y: model targets
+#     """
+#     x = np.random.standard_normal(size=(n, time_steps, input_dim))
+#     y = np.random.randint(low=0, high=2, size=(n, 1))
+#     x[:, attention_column, :] = np.tile(y[:], (1, input_dim))
+#     return x, y
 
 def attention_3d_block(inputs, time_steps, single_attention_vector):
     # inputs.shape = (batch_size, time_steps, input_dim)
