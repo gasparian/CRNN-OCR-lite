@@ -27,6 +27,7 @@ if __name__ == '__main__':
 
     # python3 train.py --G 1 --path /input_data --training_fname imlist.txt --save_path /save_path --model_name CRNN_OCR_model --nbepochs 20 --norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --cyclic_lr
     # python3 train.py --G 1 --path /input_data --training_fname annotation_train.txt --val_fname annotation_test.txt --save_path /save_path --model_name OCR_ver11 --nbepochs 20 --norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --cyclic_lr
+    # python3 train.py --G 1 --path /input_data --training_fname annotation_train.txt --val_fname annotation_test.txt --save_path /save_path --model_name OCR_fulldata --nbepochs 4 --norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --batch_size 64
 
     parser = argparse.ArgumentParser(description='crnn_ctc_loss')
     parser.add_argument('-p', '--path', type=str, required=True)
@@ -190,14 +191,14 @@ if __name__ == '__main__':
         save_single_model(name)
     print(" [INFO] Models and history saved! ")
 
-    print(" [INFO] Computing edit distance metric with the best model... ")
-    model = load_model_custom(save_path+"/"+model_name, weights="checkpoint_weights")
-    model = init_predictor(model)
-    indeces = np.random.randint(0, len(val), 10000)
-    predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h), steps=test_steps*2)
-    y_true = reader.get_labels(val)
-    true_text = [labels_to_text(y_true[i], inverse_classes=inverse_classes) for i in range(len(y_true[indeces]))]
-    predicted_text = decode_predict_ctc(out=predicted[indeces], top_paths=1, beam_width=3, inverse_classes=inverse_classes)
-    edit_distance_score = edit_distance(predicted_text, true_text)
-    normalized_edit_distance_score = normalized_edit_distance(predicted_text, true_text)
-    print(" [INFO] mean edit distance: %f ; normalized edit distance score: %f" % (edit_distance_score, normalized_edit_distance_score))
+    # print(" [INFO] Computing edit distance metric with the best model... ")
+    # model = load_model_custom(save_path+"/"+model_name, weights="checkpoint_weights")
+    # model = init_predictor(model)
+    # indeces = np.random.randint(0, len(val), 10000)
+    # predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h), steps=test_steps*2)
+    # y_true = reader.get_labels(val)
+    # true_text = [labels_to_text(y_true[i], inverse_classes=inverse_classes) for i in range(len(y_true[indeces]))]
+    # predicted_text = decode_predict_ctc(out=predicted[indeces], top_paths=1, beam_width=3, inverse_classes=inverse_classes)
+    # edit_distance_score = edit_distance(predicted_text, true_text)
+    # normalized_edit_distance_score = normalized_edit_distance(predicted_text, true_text)
+    # print(" [INFO] mean edit distance: %f ; normalized edit distance score: %f" % (edit_distance_score, normalized_edit_distance_score))

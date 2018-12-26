@@ -402,7 +402,7 @@ class Readf:
                     img = cv2.imread(name)
                     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-                    #no need for now, because IAM dataset already preprocessed with all needed offsets
+                    #stroke below doesn't needed for now, because IAM dataset already preprocessed with all needed offsets
                     #img = set_offset_monochrome(img, offset=self.offset, fill=self.fill)
 
                     word = self.parse_name(name)
