@@ -15,18 +15,6 @@ from tqdm import tqdm
 
 from utils import padd, get_lexicon
 
-def make_target(text, one_hot=False, classes=None):
-    if one_hot:
-        target = np.empty((len(text), len(classes)))
-        for i, char in enumerate(text):
-            ohe = np.zeros(len(classes))
-            ohe[classes[char]] = 1
-            target[i, :] = ohe
-        return target
-    else:
-        voc = list(classes.keys())
-        return np.array([classes[char] for char in text if char in voc])
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Process IAM dataset')
@@ -46,6 +34,11 @@ if __name__ == "__main__":
     # punct = [i for i in string.punctuation] + ["'s", "'ve", "'ll", "'am", "'re"]
     """
     classes = {j:i for i, j in enumerate(get_lexicon())}
+
+    # modified version of func. from utils
+    def make_target(text):
+        voc = list(classes.keys())
+        return np.array([classes[char] if char in voc else classes['-'] for char in text])
 
     # declare constants
     pad = True
@@ -67,8 +60,7 @@ if __name__ == "__main__":
             line = [word for word in line if word.attrib]
             for i in range(len(line)):
                 word = line[i]
-                #text = word.attrib['text'].lower()
-                text = word.attrib['text']
+                text = word.attrib['text'].lower()
                 if counters[0] <= len(text) <= counters[1]:
                     img_name = word.attrib['id'].split('-')
                     img_name = img_name[0]+'/'+'-'.join(img_name[:2])+'/'+'-'.join(img_name)+'.png'
@@ -80,8 +72,7 @@ if __name__ == "__main__":
                     except:
                         print('file not loaded')
                         continue
-                    target_ohe[word.attrib['id']] = make_target(text, one_hot=True, classes=classes)
-                    target[word.attrib['id']] = make_target(text, one_hot=False, classes=classes)
+                    target[word.attrib['id']] = make_target(text)
 
                     if length_bins is None and height_bins is None:
                         copyfile(path+'words/'+img_name, path+new_path+'/'+word.attrib['id']+'.png')
@@ -97,4 +88,3 @@ if __name__ == "__main__":
     pickle.dump(classes, open(path+new_path+'/classes.pickle.dat', 'wb'))
     pickle.dump(lengths, open(path+new_path+'/lengths.pickle.dat', 'wb'))
     pickle.dump(target, open(path+new_path+'/target.pickle.dat', 'wb'))
-    pickle.dump(target_ohe, open(path+new_path+'/target_ohe.pickle.dat', 'wb'))

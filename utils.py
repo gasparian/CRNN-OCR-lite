@@ -366,9 +366,9 @@ class Readf:
         source_str, i, n = [], 0, 0
         N = len(names) // self.batch_size
         X_data, Y_data, input_length, label_length = self.get_blank_matrices()
-        if self.mjsynth:
-            while True:
-                for name in names:
+        while True:
+            for name in names:
+                if self.mjsynth:
                     try:
                         img, word = self.open_img(name, pad=True)
                     except:
@@ -381,60 +381,9 @@ class Readf:
                     Y_data[i, 0:len(word)] = word
                     label_length[i] = len(word)
 
-                    if self.normed:
-                        img = (img - self.mean) / self.std
-
-                    if img.shape[1] >= img.shape[0]:
-                        img = img[::-1].T
-                        if not self.flag:
-                            self.img_size = (self.img_size[1], self.img_size[0])
-                            self.flag = True
-
-                    if self.flag:
-                        input_length[i] = (self.img_size[1]+4) // downsample_factor - 2
-                    else:
-                        input_length[i] = (self.img_size[0]+4) // downsample_factor - 2
-
-                    img = img[:,:,np.newaxis]
-
-                    X_data[i] = img
-                    i += 1
-
-                    if n == N and i == (len(names) % self.batch_size):
-                        inputs = {
-                            'the_input': X_data,
-                            'the_labels': Y_data,
-                            'input_length': input_length,
-                            'label_length': label_length,
-                            'source_str': np.array(source_str)
-                        }
-                        outputs = {'ctc': np.zeros([self.batch_size])}
-                        yield (inputs, outputs)
-
-                    elif i == self.batch_size:
-                        inputs = {
-                            'the_input': X_data,
-                            'the_labels': Y_data,
-                            'input_length': input_length,
-                            'label_length': label_length,
-                            'source_str': np.array(source_str)
-                        }
-                        outputs = {'ctc': np.zeros([self.batch_size])}
-                        source_str, i = [], 0
-                        X_data, Y_data, input_length, label_length = self.get_blank_matrices()
-                        n += 1
-                        yield (inputs, outputs)
-
-
-        else:
-            while True:
-                for name in names:
-
+                else:
                     img = cv2.imread(name)
                     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-                    #stroke below doesn't needed for now, because IAM dataset already preprocessed with all needed offsets
-                    #img = set_offset_monochrome(img, offset=self.offset, fill=self.fill)
 
                     word = self.parse_name(name)
                     source_str.append(word)
@@ -445,54 +394,55 @@ class Readf:
 
                     #invert image colors.
                     img = cv2.bitwise_not(img)
-
-                    if img.shape[1] >= img.shape[0]:
-                        img = img[::-1].T
-                        if not self.flag:
-                            self.img_size = (self.img_size[1], self.img_size[0])
-                            self.flag = True
-
-                    if self.flag:
-                        input_length[i] = (self.img_size[1]+4) // downsample_factor - 2
-                    else:
-                        input_length[i] = (self.img_size[0]+4) // downsample_factor - 2
-
+                    
                     img = cv2.resize(img, self.img_size, Image.LANCZOS)
                     img = cv2.threshold(img, self.trsh, 255,
                         cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
 
-                    img = img[:,:,np.newaxis]
+                if self.normed:
+                    img = (img - self.mean) / self.std
+                img = norm(img)
 
-                    if self.normed:
-                        img = norm(img)
+                if img.shape[1] >= img.shape[0]:
+                    img = img[::-1].T
+                    if not self.flag:
+                        self.img_size = (self.img_size[1], self.img_size[0])
+                        self.flag = True
 
-                    X_data[i] = img
-                    i += 1
+                if self.flag:
+                    input_length[i] = (self.img_size[1]+4) // downsample_factor - 2
+                else:
+                    input_length[i] = (self.img_size[0]+4) // downsample_factor - 2
 
-                    if n == N and i == (len(names) % self.batch_size):
-                        inputs = {
-                            'the_input': X_data,
-                            'the_labels': Y_data,
-                            'input_length': input_length,
-                            'label_length': label_length,
-                            'source_str': np.array(source_str)
-                        }
-                        outputs = {'ctc': np.zeros([self.batch_size])}
-                        yield (inputs, outputs)
+                img = img[:,:,np.newaxis]
 
-                    elif i == self.batch_size:
-                        inputs = {
-                            'the_input': X_data,
-                            'the_labels': Y_data,
-                            'input_length': input_length,
-                            'label_length': label_length,
-                            'source_str': np.array(source_str)
-                        }
-                        outputs = {'ctc': np.zeros([self.batch_size])}
-                        source_str, i = [], 0
-                        X_data, Y_data, input_length, label_length = self.get_blank_matrices()
-                        n += 1
-                        yield (inputs, outputs)
+                X_data[i] = img
+                i += 1
+
+                if n == N and i == (len(names) % self.batch_size):
+                    inputs = {
+                        'the_input': X_data,
+                        'the_labels': Y_data,
+                        'input_length': input_length,
+                        'label_length': label_length,
+                        'source_str': np.array(source_str)
+                    }
+                    outputs = {'ctc': np.zeros([self.batch_size])}
+                    yield (inputs, outputs)
+
+                elif i == self.batch_size:
+                    inputs = {
+                        'the_input': X_data,
+                        'the_labels': Y_data,
+                        'input_length': input_length,
+                        'label_length': label_length,
+                        'source_str': np.array(source_str)
+                    }
+                    outputs = {'ctc': np.zeros([self.batch_size])}
+                    source_str, i = [], 0
+                    X_data, Y_data, input_length, label_length = self.get_blank_matrices()
+                    n += 1
+                    yield (inputs, outputs)
 
 def get_lengths(names):
     d = {}
@@ -504,7 +454,7 @@ def get_lengths(names):
         d[name] = len(edited_name.split("_")[-2])
     return d
 
-def get_lexicon(non_intersecting_char=False):
+def get_lexicon(non_intersecting_chars=False):
     if non_intersecting_chars:
         return list(set([i for i in '0123456789'+string.ascii_lowercase+'AaBbDdEeFfGgHhLlMmNnQqRrTt'+'-']))
         #return [i for i in string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation+' ']
