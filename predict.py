@@ -1,4 +1,6 @@
 import sys
+import os
+os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 import pickle
 import time
 
@@ -14,52 +16,17 @@ from tensorflow import ConfigProto, Session
 import cv2
 
 from reader import bbox2, set_offset_monochrome, norm, padd
-
-def load_model(path):
-    json_file = open(path+'/model.json', 'r')
-    loaded_model_json = json_file.read()
-    json_file.close()
-    loaded_model = model_from_json(loaded_model_json)
-    loaded_model.load_weights(path+"/model.h5")
-    return loaded_model
-
-def init_predictor(model):
-    return Model(inputs=model.get_layer('the_input').output, outputs=model.get_layer('softmax').output)
-
-class DecodeCTCPred:
-
-    def __init__(self, predictor, top_paths=1, beam_width=5, inverse_classes=None):
-        self.predictor = predictor
-        self.top_paths = top_paths
-        self.beam_width = beam_width
-        self.inverse_classes = inverse_classes
-
-    def labels_to_text(self, labels):
-        ret = []
-        for c in labels:
-            if c == len(self.inverse_classes):
-                ret.append("")
-            else:
-                ret.append(self.inverse_classes[c])
-        return "".join(ret)
-
-    def decode(self, a):
-        c = np.expand_dims(a, axis=0)
-        out = self.predictor.predict(c)
-        results = []
-        if self.beam_width < self.top_paths:
-          self.beam_width = self.top_paths
-        for i in range(self.top_paths):
-            labels = K.get_value(K.ctc_decode(out, input_length=np.ones(out.shape[0])*out.shape[1],
-                               greedy=False, beam_width=self.beam_width, top_paths=self.top_paths)[0][i])[0]
-            text = self.labels_to_text(labels)
-            results.append(text)
-        return results
+from utils import custom_load_model, init_predictor, DecodeCTCPred
 
 if __name__ == '__main__':
 
     path, image_path = sys.argv[1], sys.argv[2]
     gpu, pad = 0, True
+
+    # if len(G) == 1:
+    #     os.environ["CUDA_VISIBLE_DEVICES"] = G
+    # else:
+    #     os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
     device_config = ConfigProto(intra_op_parallelism_threads=4,\
             inter_op_parallelism_threads=4, allow_soft_placement=True,\
@@ -67,7 +34,7 @@ if __name__ == '__main__':
     session = Session(config=device_config)
     K.set_session(session)
 
-    model = init_predictor(load_model(path))
+    model = init_predictor(custom_load_model(path))
     classes = pickle.load(open(path+'/classes.pickle.dat', 'rb'))
     decoder = DecodeCTCPred(model, top_paths=1, beam_width=5, 
         inverse_classes={v:k for k, v in classes.items()})

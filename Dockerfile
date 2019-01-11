@@ -2,7 +2,7 @@
 # module list
 # ------------------------------------------------------------------
 # + python         3.6   (apt)
-# + tensorflow-gpu 1.5   (pip)
+# + tensorflow-gpu 1.8   (pip)
 # + keras          2.2.2 (pip)
 # + opencv         3.4.2 (git)
 # ==================================================================
@@ -66,7 +66,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         ./bootstrap.sh --with-python=python3.6 && \
         ./b2 install --prefix=/usr/local && \
     $PIP_INSTALL \
-        tensorflow-gpu==1.5.0 \
+        tensorflow-gpu==1.8.0 \
         && \
     $PIP_INSTALL \
         h5py \

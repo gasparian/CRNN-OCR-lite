@@ -3,6 +3,7 @@ import re
 import pickle
 import operator 
 import math
+import string
 from collections import OrderedDict
 
 import cv2
@@ -14,7 +15,9 @@ from tqdm import tqdm
 from keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, add, \
                          Dense, Input, Lambda, Bidirectional, ZeroPadding2D, concatenate, \
                          concatenate, multiply, ReLU, DepthwiseConv2D, TimeDistributed
+
 from keras.layers import LSTM, GRU
+# Inference only on GPU:
 # from keras.layers import CuDNNLSTM as LSTM
 # from keras.layers import CuDNNGRU as GRU
 from keras.layers.core import *
@@ -50,15 +53,13 @@ from keras import backend as K
 
 ###############################################################################################
 
-###############################################################################################
-# TO DO:
-###############################################################################################
-
-# - add bidirectional sliced lstm to make net much more faster;
-# - problem with N batches in inference mode - why it's need to multiply by 2 the 
-# number of steps?;
-
-###############################################################################################
+def custom_load_model(path, model_name="model.json", weights="model.h5"):
+    json_file = open(path+"/"+model_name, 'r')
+    loaded_model_json = json_file.read()
+    json_file.close()
+    loaded_model = model_from_json(loaded_model_json)
+    loaded_model.load_weights(path+"/"+weights)
+    return loaded_model
 
 class CRNN:
 
@@ -66,12 +67,10 @@ class CRNN:
 
         self.num_classes = num_classes
         self.shape = shape
-        self.attention = attention
         self.max_string_len = max_string_len
         self.n_units = n_units
         self.GRU = GRU
         self.time_dense_size = time_dense_size
-        self.single_attention_vector = single_attention_vector
 
     def depthwise_conv_block(self, inputs, pointwise_conv_filters, conv_size=(3, 3), pooling=None):
         x = DepthwiseConv2D((3, 3), padding='same', strides=(1, 1), depth_multiplier=1, use_bias=False)(inputs)
@@ -204,7 +203,10 @@ def load_model_custom(path, weights="model"):
     return loaded_model
 
 def init_predictor(model):
-    return Model(inputs=model.input, outputs=model.get_layer('softmax').output)
+    try:
+        return Model(inputs=model.input, outputs=model.get_layer('softmax').output)
+    except:
+        return Model(inputs=model.get_layer('the_input').output, outputs=model.get_layer('softmax').output)
 
 def labels_to_text(labels, inverse_classes=None):
     ret = []
@@ -232,10 +234,40 @@ def decode_predict_ctc(out=None, top_paths=1, beam_width=3, inverse_classes=None
         results.append(text)
     return results
 
+class DecodeCTCPred:
+
+    def __init__(self, predictor, top_paths=1, beam_width=5, inverse_classes=None):
+        self.predictor = predictor
+        self.top_paths = top_paths
+        self.beam_width = beam_width
+        self.inverse_classes = inverse_classes
+
+    def labels_to_text(self, labels):
+        ret = []
+        for c in labels:
+            if c == len(self.inverse_classes):
+                ret.append("")
+            else:
+                ret.append(self.inverse_classes[c])
+        return "".join(ret)
+
+    def decode(self, a):
+        c = np.expand_dims(a, axis=0)
+        out = self.predictor.predict(c)
+        results = []
+        if self.beam_width < self.top_paths:
+          self.beam_width = self.top_paths
+        for i in range(self.top_paths):
+            labels = K.get_value(K.ctc_decode(out, input_length=np.ones(out.shape[0])*out.shape[1],
+                               greedy=False, beam_width=self.beam_width, top_paths=self.top_paths)[0][i])[0]
+            text = self.labels_to_text(labels)
+            results.append(text)
+        return results
+
 class Readf:
 
-    def __init__(self, path, training_file, img_size=(40,40), trsh=100, normed=False, fill=255, offset=5, mjsynth=False,
-                    random_state=None, length_sort_mode='target', batch_size=32, classes=None, reorder=False):
+    def __init__(self, path, training_file=None, img_size=(40,40), trsh=100, normed=False, fill=255, offset=5, mjsynth=False,
+                    random_state=None, length_sort_mode='target', batch_size=32, classes=None, reorder=False, max_train_length=None):
         self.trsh = trsh
         self.mjsynth = mjsynth
         self.reorder = reorder
@@ -247,11 +279,10 @@ class Readf:
         self.fill = fill
         self.normed = normed
         if self.mjsynth:
-            #self.names = open(path+'/'+training_file, "r").readlines()[:10000] #<<<
-            self.names = open(path+'/'+training_file, "r").readlines()
+            self.names = open(path+'/'+training_file, "r").readlines()[:max_train_length]
         else:
             self.names = [os.path.join(dp, f) for dp, dn, filenames in os.walk(path)
-                for f in filenames if re.search('png|jpeg|jpg', f)]
+                for f in filenames if re.search('png|jpeg|jpg', f)][:max_train_length]
         self.length = len(self.names)
         self.prng = RandomState(random_state)
         self.prng.shuffle(self.names)
@@ -473,6 +504,14 @@ def get_lengths(names):
         d[name] = len(edited_name.split("_")[-2])
     return d
 
+def get_lexicon(non_intersecting_char=False):
+    if non_intersecting_chars:
+        return list(set([i for i in '0123456789'+string.ascii_lowercase+'AaBbDdEeFfGgHhLlMmNnQqRrTt'+'-']))
+        #return [i for i in string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation+' ']
+    else:
+        return [i for i in '0123456789'+string.ascii_lowercase+'-']
+    
+
 def norm(image):
     return image.astype('float32') / 255.
 
@@ -635,8 +674,13 @@ def set_offset_monochrome(img, offset=20, fill=0):
         
     return img[y1:y2, x1:x2].astype(np.uint8)
 
-def save_single_model(path):
-    sinlge_model = multi_model.layers[-2]
+def save_model_json(model, save_path, model_name):
+    model_json = model.to_json()
+    with open(save_path+'/'+model_name+"/model.json", "w") as json_file:
+        json_file.write(model_json)
+
+def save_single_model(model, path):
+    sinlge_model = model.layers[-2]
     sinlge_model.save(path+'/single_gpu_model.hdf5')
     model_json = sinlge_model.to_json()
     with open(path+"/single_gpu_model.json", "w") as json_file:
