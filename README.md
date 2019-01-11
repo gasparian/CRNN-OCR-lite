@@ -1,4 +1,4 @@
-# CRNN_OCR_keras
+# CRNN_OCR_lite
 
 ## Training
 
