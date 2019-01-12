@@ -13,8 +13,8 @@ from PIL import Image, ImageDraw
 from tqdm import tqdm
 
 from keras.layers import Conv2D, MaxPooling2D, Activation, Dropout, add, \
-                         Dense, Input, Lambda, Bidirectional, ZeroPadding2D, concatenate, \
-                         concatenate, multiply, ReLU, DepthwiseConv2D, TimeDistributed
+                         Dense, Input, Lambda, Bidirectional, ZeroPadding2D, concatenate, Flatten, \
+                         concatenate, multiply, ReLU, DepthwiseConv2D, TimeDistributed, MaxPool2D
 
 from keras.layers import LSTM, GRU
 # Inference only on GPU:
@@ -26,32 +26,7 @@ from keras.callbacks import Callback
 from keras.models import Model, load_model, model_from_json
 from keras import optimizers
 from keras import backend as K
-
-###############################################################################################
-#                                       REFERENCES                                            #
-###############################################################################################
-
-# https://github.com/meijieru/crnn.pytorch
-# https://github.com/sbillburg/CRNN-with-STN/blob/master/CRNN_with_STN.py
-# https://github.com/keras-team/keras/blob/master/examples/image_ocr.py
-# https://github.com/keras-team/keras-applications/blob/master/keras_applications/mobilenet.py
-#
-# Sliced RNN:
-# https://github.com/zepingyu0512/srnn/blob/master/SRNN.py
-#
-# Attention block:
-# https://github.com/philipperemy/keras-attention-mechanism.git
-
-###############################################################################################
-# LOGS:
-###############################################################################################
-
-# - casual convs: 8857k params; 16 epochs, 500k training examples: ctc_loss - ~0.91
-# - depthwise separable convs and dropouts: 2785k params; 20 epochs, 500k training 
-#   examples; 3181s; 429ms/step; 63592 s.; ctc_loss: ~0.85
-# 
-
-###############################################################################################
+import tensorflow as tf
 
 def custom_load_model(path, model_name="model.json", weights="model.h5"):
     json_file = open(path+"/"+model_name, 'r')
@@ -63,13 +38,14 @@ def custom_load_model(path, model_name="model.json", weights="model.h5"):
 
 class CRNN:
 
-    def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), time_dense_size=128, GRU=False, n_units=256):
+    def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), time_dense_size=128, GRU=False, n_units=256, STN=False):
 
         self.num_classes = num_classes
         self.shape = shape
         self.max_string_len = max_string_len
         self.n_units = n_units
         self.GRU = GRU
+        self.STN = STN
         self.time_dense_size = time_dense_size
 
     def depthwise_conv_block(self, inputs, pointwise_conv_filters, conv_size=(3, 3), pooling=None):
@@ -90,7 +66,11 @@ class CRNN:
     def get_model(self):
         self.pooling_counter_h, self.pooling_counter_w = 0, 0
         inputs = Input(name='the_input', shape=self.shape, dtype='float32') #100x32x1
-        x = ZeroPadding2D(padding=(2, 2))(inputs) #104x36x1
+        # Spatial transformer part
+        if self.STN:
+            x = STN(inputs, sampling_size=self.shape[:2]) #100x32x1
+
+        x = ZeroPadding2D(padding=(2, 2))(x) #104x36x1
         x = self.depthwise_conv_block(x, 64, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 128, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=(2, 2))  #52x18x256
@@ -131,6 +111,158 @@ def ctc_lambda_func(args):
 
     y_pred = y_pred[:, 2:, :]
     return K.ctc_batch_cost(labels, y_pred, input_length, label_length)
+
+########################################################################
+# SPATIAL TRANSFORMER
+########################################################################
+
+from keras.engine.topology import Layer
+def K_meshgrid(x, y):
+    return tf.meshgrid(x, y)
+
+def K_linspace(start, stop, num):
+    return tf.linspace(start, stop, num)
+
+class BilinearInterpolation(Layer):
+
+    """Performs bilinear interpolation as a keras layer
+    References
+    ----------
+    [1]  Spatial Transformer Networks, Max Jaderberg, et al.
+    [2]  https://github.com/skaae/transformer_network
+    [3]  https://github.com/EderSantana/seya
+    """
+
+    def __init__(self, output_size, **kwargs):
+        self.output_size = output_size
+        super(BilinearInterpolation, self).__init__(**kwargs)
+
+    def compute_output_shape(self, input_shapes):
+        height, width = self.output_size
+        num_channels = input_shapes[0][-1]
+        return (None, height, width, num_channels)
+
+    def call(self, tensors, mask=None):
+        X, transformation = tensors
+        output = self._transform(X, transformation, self.output_size)
+        return output
+
+    def _interpolate(self, image, sampled_grids, output_size):
+
+        batch_size = K.shape(image)[0]
+        height = K.shape(image)[1]
+        width = K.shape(image)[2]
+        num_channels = K.shape(image)[3]
+
+        x = K.cast(K.flatten(sampled_grids[:, 0:1, :]), dtype='float32')
+        y = K.cast(K.flatten(sampled_grids[:, 1:2, :]), dtype='float32')
+
+        x = .5 * (x + 1.0) * K.cast(width, dtype='float32')
+        y = .5 * (y + 1.0) * K.cast(height, dtype='float32')
+
+        x0 = K.cast(x, 'int32')
+        x1 = x0 + 1
+        y0 = K.cast(y, 'int32')
+        y1 = y0 + 1
+
+        max_x = int(K.int_shape(image)[2] - 1)
+        max_y = int(K.int_shape(image)[1] - 1)
+
+        x0 = K.clip(x0, 0, max_x)
+        x1 = K.clip(x1, 0, max_x)
+        y0 = K.clip(y0, 0, max_y)
+        y1 = K.clip(y1, 0, max_y)
+
+        pixels_batch = K.arange(0, batch_size) * (height * width)
+        pixels_batch = K.expand_dims(pixels_batch, axis=-1)
+        flat_output_size = output_size[0] * output_size[1]
+        base = K.repeat_elements(pixels_batch, flat_output_size, axis=1)
+        base = K.flatten(base)
+
+        # base_y0 = base + (y0 * width)
+        base_y0 = y0 * width
+        base_y0 = base + base_y0
+        # base_y1 = base + (y1 * width)
+        base_y1 = y1 * width
+        base_y1 = base_y1 + base
+
+        indices_a = base_y0 + x0
+        indices_b = base_y1 + x0
+        indices_c = base_y0 + x1
+        indices_d = base_y1 + x1
+
+        flat_image = K.reshape(image, shape=(-1, num_channels))
+        flat_image = K.cast(flat_image, dtype='float32')
+        pixel_values_a = K.gather(flat_image, indices_a)
+        pixel_values_b = K.gather(flat_image, indices_b)
+        pixel_values_c = K.gather(flat_image, indices_c)
+        pixel_values_d = K.gather(flat_image, indices_d)
+
+        x0 = K.cast(x0, 'float32')
+        x1 = K.cast(x1, 'float32')
+        y0 = K.cast(y0, 'float32')
+        y1 = K.cast(y1, 'float32')
+
+        area_a = K.expand_dims(((x1 - x) * (y1 - y)), 1)
+        area_b = K.expand_dims(((x1 - x) * (y - y0)), 1)
+        area_c = K.expand_dims(((x - x0) * (y1 - y)), 1)
+        area_d = K.expand_dims(((x - x0) * (y - y0)), 1)
+
+        values_a = area_a * pixel_values_a
+        values_b = area_b * pixel_values_b
+        values_c = area_c * pixel_values_c
+        values_d = area_d * pixel_values_d
+        return values_a + values_b + values_c + values_d
+
+    def _make_regular_grids(self, batch_size, height, width):
+        # making a single regular grid
+        x_linspace = K_linspace(-1., 1., width)
+        y_linspace = K_linspace(-1., 1., height)
+        x_coordinates, y_coordinates = K_meshgrid(x_linspace, y_linspace)
+        x_coordinates = K.flatten(x_coordinates)
+        y_coordinates = K.flatten(y_coordinates)
+        ones = K.ones_like(x_coordinates)
+        grid = K.concatenate([x_coordinates, y_coordinates, ones], 0)
+
+        # repeating grids for each batch
+        grid = K.flatten(grid)
+        grids = K.tile(grid, K.stack([batch_size]))
+        return K.reshape(grids, (batch_size, 3, height * width))
+
+    def _transform(self, X, affine_transformation, output_size):
+        batch_size, num_channels = K.shape(X)[0], K.shape(X)[3]
+        transformations = K.reshape(affine_transformation,
+                                    shape=(batch_size, 2, 3))
+        # transformations = K.cast(affine_transformation[:, 0:2, :], 'float32')
+        regular_grids = self._make_regular_grids(batch_size, *output_size)
+        sampled_grids = K.batch_dot(transformations, regular_grids)
+        interpolated_image = self._interpolate(X, sampled_grids, output_size)
+        new_shape = (batch_size, output_size[0], output_size[1], num_channels)
+        interpolated_image = K.reshape(interpolated_image, new_shape)
+        return interpolated_image
+
+def get_initial_weights(output_size):
+    b = np.zeros((2, 3), dtype='float32')
+    b[0, 0] = 1
+    b[1, 1] = 1
+    W = np.zeros((output_size, 6), dtype='float32')
+    weights = [W, b.flatten()]
+    return weights
+
+def STN(image, sampling_size=(100, 32)):
+    locnet = MaxPool2D(pool_size=(2, 2))(image)
+    locnet = Conv2D(20, (5, 5))(locnet)
+    locnet = MaxPool2D(pool_size=(2, 2))(locnet)
+    locnet = Conv2D(20, (5, 5))(locnet)
+    locnet = Flatten()(locnet)
+    locnet = Dense(50)(locnet)
+    locnet = Activation('relu')(locnet)
+    weights = get_initial_weights(50)
+    locnet = Dense(6, weights=weights)(locnet)
+    x = BilinearInterpolation(sampling_size)([image, locnet])
+    return x
+
+########################################################################
 
 def levenshtein(seq1, seq2):  
     size_x = len(seq1) + 1
@@ -394,7 +526,7 @@ class Readf:
 
                     #invert image colors.
                     img = cv2.bitwise_not(img)
-                    
+
                     img = cv2.resize(img, self.img_size, Image.LANCZOS)
                     img = cv2.threshold(img, self.trsh, 255,
                         cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
@@ -662,11 +794,6 @@ def EMA(data, alpha=0.0002):
             k += 1
     return av
 
-from tensorflow.python.client import device_lib
-def get_available_gpus():
-    local_device_protos = device_lib.list_local_devices()
-    return [x.name for x in local_device_protos if x.device_type == 'GPU']
-
 class LossHistory(Callback):
     def on_train_begin(self, logs={}):
         self.losses = {"loss":[], "val_loss":[]}
@@ -675,29 +802,23 @@ class LossHistory(Callback):
         self.losses["loss"].append(logs.get('loss'))
         self.losses["val_loss"].append(logs.get('val_loss'))
 
-#####################################################################################################################
-# keras-CLR port from fastai
-# https://github.com/metachi/fastaiv2keras
-#####################################################################################################################
-
 class LR_Updater(Callback):
-    '''This callback is utilized to log learning rates every iteration (batch cycle)
-    it is not meant to be directly used as a callback but extended by other callbacks
-    ie. LR_Cycle
-    '''
-    def __init__(self, iterations, epochs=1):
+
+    def __init__(self):
         '''
         iterations = dataset size / batch size
         epochs = pass through full training dataset
         '''
-        self.epoch_iterations = iterations
         self.trn_iterations = 0.
         self.history = {}
+
     def setRate(self):
         return K.get_value(self.model.optimizer.lr)
+
     def on_train_begin(self, logs={}):
         self.trn_iterations = 0.
         logs = logs or {}
+
     def on_batch_end(self, batch, logs=None):
         logs = logs or {}
         self.trn_iterations += 1
@@ -706,176 +827,32 @@ class LR_Updater(Callback):
         self.history.setdefault('iterations', []).append(self.trn_iterations)
         for k, v in logs.items():
             self.history.setdefault(k, []).append(v)
+
     def plot_lr(self):
         plt.xlabel("iterations")
         plt.ylabel("learning rate")
         plt.plot(self.history['iterations'], self.history['lr'])
+
     def plot(self, n_skip=10):
         plt.xlabel("learning rate (log scale)")
         plt.ylabel("loss")
         plt.plot(self.history['lr'][n_skip:-5], self.history['loss'][n_skip:-5])
         plt.xscale('log')
 
-class LR_Find(LR_Updater):
-    '''This callback is utilized to determine the optimal lr to be used
-    it is based on this pytorch implementation https://github.com/fastai/fastai/blob/master/fastai/learner.py
-    and adopted from this keras implementation https://github.com/bckenstler/CLR
-    it loosely implements methods described in the paper https://arxiv.org/pdf/1506.01186.pdf
-    '''
+class LR_Schedule(LR_Updater):
 
-    def __init__(self, iterations, epochs=1, min_lr=1e-05, max_lr=10, jump=6):
-        '''
-        iterations = dataset size / batch size
-        epochs should always be 1
-        min_lr is the starting learning rate
-        max_lr is the upper bound of the learning rate
-        jump is the x-fold loss increase that will cause training to stop (defaults to 6)
-        '''
-        self.min_lr = min_lr
-        self.max_lr = max_lr
-        self.lr_mult = (max_lr/min_lr)**(1/iterations)
-        self.jump = jump
-        super().__init__(iterations, epochs=epochs)
-    def setRate(self):
-        return self.min_lr * (self.lr_mult**self.trn_iterations)
-    def on_train_begin(self, logs={}):
-        super().on_train_begin(logs=logs)
-        try: #multiple lr's
-            K.get_variable_shape(self.model.optimizer.lr)[0]
-            self.min_lr = np.full(K.get_variable_shape(self.model.optimizer.lr),self.min_lr)
-        except IndexError:
-            pass
-        K.set_value(self.model.optimizer.lr, self.min_lr)
-        self.best=1e9
-    def on_batch_end(self, batch, logs=None):
-        #check if we have made an x-fold jump in loss and training should stop
-        try:
-            loss = self.history['loss'][-1]
-            if math.isnan(loss) or loss > self.best*self.jump:
-                self.max_lr = K.get_value(self.model.optimizer.lr)
-                self.model.stop_training = True
-            if loss < self.best:
-                self.best=loss
-        except KeyError:
-            pass
-        super().on_batch_end(batch, logs=logs)
-        
-class LR_Cycle(LR_Updater):
-    '''This callback is utilized to implement cyclical learning rates
-    it is based on this pytorch implementation https://github.com/fastai/fastai/blob/master/fastai
-    and adopted from this keras implementation https://github.com/bckenstler/CLR
-    it loosely implements methods described in the paper https://arxiv.org/pdf/1506.01186.pdf
-    '''
-    def __init__(self, iterations, cycle_len=1, cycle_mult=1, epochs=1):
-        '''
-        iterations = dataset size / batch size
-        epochs #todo do i need this or can it accessed through self.model
-        cycle_len = num of times learning rate anneals from its max to its min in an epoch
-        cycle_mult = used to increase the cycle length cycle_mult times after every cycle
-        for example: cycle_mult = 2 doubles the length of the cycle at the end of each cy$
-        '''
-        self.min_lr = 0
-        self.cycle_len = cycle_len
-        self.cycle_mult = cycle_mult
-        self.cycle_iterations = 0.
-        super().__init__(iterations, epochs=epochs)
+    def __init__(self, schedule={}):
+        self.schedule = schedule
+        self.cycle_iterations = 0
+        super().__init__()
+
     def setRate(self):
         self.cycle_iterations += 1
-        cos_out = np.cos(np.pi*(self.cycle_iterations)/self.epoch_iterations) + 1
-        if self.cycle_iterations==self.epoch_iterations:
-            self.cycle_iterations = 0.
-            self.epoch_iterations *= self.cycle_mult
-        return self.max_lr / 2 * cos_out
+        for k, v in self.schedule.items():
+            if self.cycle_iterations < k:
+                return v
+        
     def on_train_begin(self, logs={}):
         super().on_train_begin(logs={}) #changed to {} to fix plots after going from 1 to mult. lr
         self.cycle_iterations = 0.
         self.max_lr = K.get_value(self.model.optimizer.lr)
-
-#####################################################################################################################
-
-#ATTENTION LAYER
-# def get_activations(model, inputs, print_shape_only=False, layer_name=None):
-#     # Documentation is available online on Github at the address below.
-#     # From: https://github.com/philipperemy/keras-visualize-activations
-#     print('----- activations -----')
-#     activations = []
-#     inp = model.input
-#     if layer_name is None:
-#         outputs = [layer.output for layer in model.layers]
-#     else:
-#         outputs = [layer.output for layer in model.layers if layer.name == layer_name]  # all layer outputs
-#     funcs = [K.function([inp] + [K.learning_phase()], [out]) for out in outputs]  # evaluation functions
-#     layer_outputs = [func([inputs, 1.])[0] for func in funcs]
-#     for layer_activations in layer_outputs:
-#         activations.append(layer_activations)
-#         if print_shape_only:
-#             print(layer_activations.shape)
-#         else:
-#             print(layer_activations)
-#     return activations
-
-
-# def get_data(n, input_dim, attention_column=1):
-#     """
-#     Data generation. x is purely random except that it's first value equals the target y.
-#     In practice, the network should learn that the target = x[attention_column].
-#     Therefore, most of its attention should be focused on the value addressed by attention_column.
-#     :param n: the number of samples to retrieve.
-#     :param input_dim: the number of dimensions of each element in the series.
-#     :param attention_column: the column linked to the target. Everything else is purely random.
-#     :return: x: model inputs, y: model targets
-#     """
-#     x = np.random.standard_normal(size=(n, input_dim))
-#     y = np.random.randint(low=0, high=2, size=(n, 1))
-#     x[:, attention_column] = y[:, 0]
-#     return x, y
-
-
-# def get_data_recurrent(n, time_steps, input_dim, attention_column=10):
-#     """
-#     Data generation. x is purely random except that it's first value equals the target y.
-#     In practice, the network should learn that the target = x[attention_column].
-#     Therefore, most of its attention should be focused on the value addressed by attention_column.
-#     :param n: the number of samples to retrieve.
-#     :param time_steps: the number of time steps of your series.
-#     :param input_dim: the number of dimensions of each element in the series.
-#     :param attention_column: the column linked to the target. Everything else is purely random.
-#     :return: x: model inputs, y: model targets
-#     """
-#     x = np.random.standard_normal(size=(n, time_steps, input_dim))
-#     y = np.random.randint(low=0, high=2, size=(n, 1))
-#     x[:, attention_column, :] = np.tile(y[:], (1, input_dim))
-#     return x, y
-
-def attention_3d_block(inputs, time_steps, single_attention_vector):
-    # inputs.shape = (batch_size, time_steps, input_dim)
-    input_dim = int(inputs.shape[2])
-    a = Permute((2, 1))(inputs)
-    a = Reshape((input_dim, time_steps))(a) # this line is not useful. It's just to know which dimension is what.
-    a = Dense(time_steps, activation='softmax')(a)
-    if single_attention_vector:
-        a = Lambda(lambda x: K.mean(x, axis=1), name='dim_reduction')(a)
-        a = RepeatVector(input_dim)(a)
-    a_probs = Permute((2, 1), name='attention_vec')(a)
-    #output_attention_mul = merge([inputs, a_probs], name='attention_mul', mode='mul') #merge is depricated
-    output_attention_mul = multiply([inputs, a_probs], name='attention_mul')
-    return output_attention_mul
-
-# def model_attention_applied_after_lstm():
-#     inputs = Input(shape=(TIME_STEPS, INPUT_DIM,))
-#     lstm_units = 32
-#     lstm_out = LSTM(lstm_units, return_sequences=True)(inputs)
-#     attention_mul = attention_3d_block(lstm_out)
-#     attention_mul = Flatten()(attention_mul)
-#     output = Dense(1, activation='sigmoid')(attention_mul)
-#     model = Model(input=[inputs], output=output)
-#     return model
-
-# def model_attention_applied_before_lstm():
-#     inputs = Input(shape=(TIME_STEPS, INPUT_DIM,))
-#     attention_mul = attention_3d_block(inputs)
-#     lstm_units = 32
-#     attention_mul = LSTM(lstm_units, return_sequences=False)(attention_mul)
-#     output = Dense(1, activation='sigmoid')(attention_mul)
-#     model = Model(input=[inputs], output=output)
-#     return models

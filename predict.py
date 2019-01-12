@@ -66,3 +66,15 @@ if __name__ == '__main__':
     prediction = decoder.decode(img)
     
     print('\n', prediction, 'inference time: ',(time.time() - start_time), 'sec.\n')
+
+    # print(" [INFO] Computing edit distance metric with the best model... ")
+    # model = load_model_custom(save_path+"/"+model_name, weights="checkpoint_weights")
+    # model = init_predictor(model)
+    # indeces = np.random.randint(0, len(val), 10000)
+    # predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h), steps=test_steps*2)
+    # y_true = reader.get_labels(val)
+    # true_text = [labels_to_text(y_true[i], inverse_classes=inverse_classes) for i in range(len(y_true[indeces]))]
+    # predicted_text = decode_predict_ctc(out=predicted[indeces], top_paths=1, beam_width=3, inverse_classes=inverse_classes)
+    # edit_distance_score = edit_distance(predicted_text, true_text)
+    # normalized_edit_distance_score = normalized_edit_distance(predicted_text, true_text)
+    # print(" [INFO] mean edit distance: %f ; normalized edit distance score: %f" % (edit_distance_score, normalized_edit_distance_score))

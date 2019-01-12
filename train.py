@@ -14,23 +14,48 @@ from numpy.random import RandomState
 
 
 """
+###############################################################################################
+#                                       REFERENCES                                            #
+###############################################################################################
+
+https://github.com/meijieru/crnn.pytorch
+https://github.com/sbillburg/CRNN-with-STN/blob/master/CRNN_with_STN.py
+https://github.com/keras-team/keras/blob/master/examples/image_ocr.py
+https://github.com/keras-team/keras-applications/blob/master/keras_applications/mobilenet.py
+Sliced RNN:
+https://github.com/zepingyu0512/srnn/blob/master/SRNN.py
+Attention block:
+https://github.com/philipperemy/keras-attention-mechanism.git
+Spatial transformer network:
+https://github.com/oarriaga/STN.keras
+
+###############################################################################################
+# LOGS:
+###############################################################################################
+
+ - casual convs: 8857k params; 16 epochs, 500k training examples: ctc_loss - ~0.91
+ - depthwise separable convs and dropouts: 2785k params; 20 epochs, 500k training 
+   examples; 3181s; 429ms/step; 63592 s.; ctc_loss: ~0.85
+
+###############################################################################################
+
 #######################################################
 # TESTs section (from the inside of Deepo universal): #
 #######################################################
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname imlist.txt \
 --save_path /data/data/OCR/data --model_name OCR_mjsynth_test --nbepochs 2 \
---norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --batch_size 64 --max_train_length 10000
+--norm --mjsynth --opt sgd --time_dense_size 128 --lr 0.002 --batch_size 64 --max_train_length 10000
 
 Check pretrained model init:
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname imlist.txt \
 --save_path /data/data/OCR/data --model_name OCR_mjsynth_test_TL --nbepochs 2 \
---norm --mjsynth --opt sgd --time_dense_size 128 --max_lr 0.002 --batch_size 64 --max_train_length 10000 \
+--norm --mjsynth --opt sgd --time_dense_size 128 --lr 0.002 --batch_size 64 --max_train_length 10000 \
 --pretrained_path /data/data/OCR/data/OCR_mjsynth_test/single_gpu_weights.h5
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname imlist.txt \
 --save_path /data/data/OCR/data --model_name OCR_IAM_test --nbepochs 2 \
---norm --opt sgd --time_dense_size 128 --max_lr 0.002 --batch_size 64 \
+--norm --opt sgd --time_dense_size 128 --lr 0.002 --batch_size 64 \
 --max_train_length 10000 --pretrained_path /data/data/OCR/data/OCR_mjsynth_test/single_gpu_weights.h5
 
 ########
@@ -41,14 +66,16 @@ docker build -t crnn_ocr:latest -f Dockerfile .
 nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data -v /data/OCR/data:/save_path -p 8000:8000 crnn_ocr
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
---val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL --nbepochs 3 \
---norm --mjsynth --opt adam --time_dense_size 128 --max_lr 0.001 --batch_size 64
+--val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL --nbepochs 2 \
+--norm --mjsynth --opt sgd --time_dense_size 128 --lr .0001 --batch_size 64 --lr_schedule --STN
 
 ##########
 # TO DO: #
 ##########
 
- - finish preprocessing for IAM dataset;
+ - pretrain model on Mjsynth dataset;
+ - make deslant algorithm;
+ - finish preprocessing for IAM dataset (insert in Readf function);
  - train model with IAM dataset with weights from mjsynth model;
  - check prediction and add WER/CER metrics inside the predict.py;
  - problem with N batches in inference mode - why it's need to multiply by 2 the number of steps?;
@@ -78,11 +105,12 @@ if __name__ == '__main__':
     parser.add_argument('--n_units', type=int, default=256)
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--opt', type=str, default="sgd")
-    parser.add_argument('--max_lr', type=float, default=0.008)
+    parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--norm', action='store_true')
     parser.add_argument('--mjsynth', action='store_true')
     parser.add_argument('--GRU', action='store_true')
-    parser.add_argument('--cyclic_lr', action='store_true')
+    parser.add_argument('--STN', action='store_true')
+    parser.add_argument('--lr_schedule', action='store_true')
     parser.add_argument('--reorder', action='store_true')
 
     # default values set according to mjsynth dataset rules
@@ -96,7 +124,7 @@ if __name__ == '__main__':
 
     import tensorflow as tf
     from keras import backend as K
-    from keras.callbacks import ModelCheckpoint
+    from keras.callbacks import ModelCheckpoint, LearningRateScheduler
     from keras.utils.training_utils import multi_gpu_model
     from keras.models import load_model, clone_model
     from keras.layers import Lambda
@@ -109,8 +137,6 @@ if __name__ == '__main__':
     os.mkdir(save_path+"/"+model_name)
     with open(save_path+'/'+model_name+"/arguments.txt", "w") as f:
         f.write(str(args))
-
-    print("[INFO] GPU devices:%s" % get_available_gpus())
 
     lexicon = get_lexicon()
 
@@ -138,7 +164,7 @@ if __name__ == '__main__':
 
     print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(reader.classes)+1, reader.max_len))
 
-    init_model = CRNN(num_classes=len(classes)+1, shape=img_size, GRU=GRU, 
+    init_model = CRNN(num_classes=len(classes)+1, shape=img_size, GRU=GRU, STN=STN,
         time_dense_size=time_dense_size, n_units=n_units, max_string_len=reader.max_len)
 
     model = init_model.get_model()
@@ -161,52 +187,40 @@ if __name__ == '__main__':
     model.summary()
 
     if opt == "adam":
-        optimizer = optimizers.Adam(lr=max_lr, beta_1=0.5, beta_2=0.999, clipnorm=5)
+        optimizer = optimizers.Adam(lr=lr, beta_1=0.5, beta_2=0.999, clipnorm=5)
     elif opt == "sgd":
-        optimizer = optimizers.SGD(lr=max_lr, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
+        optimizer = optimizers.SGD(lr=lr, decay=1e-6, momentum=0.9, nesterov=True, clipnorm=5)
 
     model.compile(loss={"ctc": lambda y_true, y_pred: y_pred}, optimizer=optimizer)
-    checkpointer = ModelCheckpoint(filepath=save_path+'/%s/checkpoint_weights.h5'%model_name, verbose=1, 
-                               save_best_only=True, save_weights_only=True)
+    callbacks_list = []
+    callbacks_list.append(ModelCheckpoint(filepath=save_path+'/%s/checkpoint_weights.h5'%model_name, verbose=1, 
+                                          save_best_only=True, save_weights_only=True))
+    if lr_schedule:
+        if mjsynth:
+            schedule = {
+                600 : 0.1,
+                train_steps // 4 : 0.002,
+                train_steps // 2 : 0.001,
+                train_steps : 0.0005,
+                train_steps * nbepochs : lr
+            }
+        else:
+            # edit this schedule accroding to IAM train dataset
+            schedule = {
+                train_steps * nbepochs : lr
+            }
 
-    if cyclic_lr:
+        callbacks_list.append(LR_Schedule(schedule))
 
-        lr_finder = LR_Find(train_steps, min_lr=1e-5, max_lr=1, jump=2)
-        model.fit_generator(
-            reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),
-            steps_per_epoch=train_steps,
-            epochs=1, callbacks=[lr_finder]
-        )
-
-        max_lr = lr_finder.max_lr
-        print("\n [INFO] Maximum learning rate: %s"%max_lr)
-        lr_finder.history.update({"max_lr":max_lr})
-        pickle.dump(lr_finder.history, open(save_path+'/'+model_name+'/lr_finder_history.pickle.dat', 'wb'))
-
-        K.set_value(model.optimizer.lr, max_lr)
-        clr = LR_Cycle(train_steps, cycle_len=1, cycle_mult=2, epochs=nbepochs)
-        H = model.fit_generator(
-            generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),
-            steps_per_epoch=train_steps,
-            epochs=nbepochs,
-            validation_data=reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h),
-            validation_steps=test_steps,
-            shuffle=False, 
-            verbose=1,
-            callbacks=[checkpointer, clr])
-        pickle.dump(clr.history, open(save_path+'/'+model_name+'/cycling_lr_history.pickle.dat', 'wb'))
-
-    else:
-
-        H = model.fit_generator(
-            generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),
-            steps_per_epoch=train_steps,
-            epochs=nbepochs,
-            validation_data=reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h),
-            validation_steps=test_steps,
-            shuffle=False, verbose=1,
-            callbacks=[checkpointer]
-        )
+    H = model.fit_generator(
+        generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),
+        steps_per_epoch=train_steps,
+        epochs=nbepochs,
+        validation_data=reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h),
+        validation_steps=test_steps,
+        shuffle=False, verbose=1,
+        callbacks=callbacks_list
+    )
 
     pickle.dump(H.history, open(save_path+'/'+model_name+'/loss_history.pickle.dat', 'wb'))
 
@@ -216,15 +230,3 @@ if __name__ == '__main__':
     model.save(save_path+'/'+model_name+"/final_model.h5")
 
     print(" [INFO] Models and history saved! ")
-
-    # print(" [INFO] Computing edit distance metric with the best model... ")
-    # model = load_model_custom(save_path+"/"+model_name, weights="checkpoint_weights")
-    # model = init_predictor(model)
-    # indeces = np.random.randint(0, len(val), 10000)
-    # predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h), steps=test_steps*2)
-    # y_true = reader.get_labels(val)
-    # true_text = [labels_to_text(y_true[i], inverse_classes=inverse_classes) for i in range(len(y_true[indeces]))]
-    # predicted_text = decode_predict_ctc(out=predicted[indeces], top_paths=1, beam_width=3, inverse_classes=inverse_classes)
-    # edit_distance_score = edit_distance(predicted_text, true_text)
-    # normalized_edit_distance_score = normalized_edit_distance(predicted_text, true_text)
-    # print(" [INFO] mean edit distance: %f ; normalized edit distance score: %f" % (edit_distance_score, normalized_edit_distance_score))
