@@ -81,7 +81,7 @@ nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
 --val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL --nbepochs 2 \
---norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --early_stopping 10000
+--norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --early_stopping 5000
 
 ##########
 # TO DO: #
@@ -233,7 +233,7 @@ if __name__ == '__main__':
 
     if early_stopping:
         callbacks_list.append(EarlyStoppingIter(monitor='loss', min_delta=.0001, patience=early_stopping,
-                                            verbose=1, restore_best_weights=True, mode="auto"))
+                                                verbose=1, restore_best_weights=True, mode="auto"))
 
     H = model.fit_generator(
         generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),

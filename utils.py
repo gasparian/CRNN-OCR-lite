@@ -882,6 +882,7 @@ class EarlyStoppingIter(Callback):
         self.restore_best_weights = restore_best_weights
         self.cycle_iterations = 0
         self.best_weights = None
+        self.sum_monitor = 0
 
         if mode not in ['auto', 'min', 'max']:
             warnings.warn('\nEarlyStopping mode %s is unknown, '
@@ -914,10 +915,13 @@ class EarlyStoppingIter(Callback):
 
     def on_batch_end(self, batch, logs=None):
         self.cycle_iterations += 1
+        logs = logs or {}
+        for k, v in logs.items():
+            if k == self.monitor:
+                self.sum_monitor += v
+
         if self.cycle_iterations % self.patience == 0:
-            current = self.get_monitor_value(logs)
-            if current is None:
-                return
+            current = self.sum_monitor / self.cycle_iterations
 
             if self.monitor_op(current - self.min_delta, self.best):
                 self.best = current
@@ -934,14 +938,4 @@ class EarlyStoppingIter(Callback):
 
     def on_train_end(self, logs=None):
         if self.stopped_iter > 0 and self.verbose > 0:
-            print('\nIteration %i: early stopping' % (self.stopped_iter + 1))
-
-    def get_monitor_value(self, logs):
-        monitor_value = logs.get(self.monitor)
-        if monitor_value is None:
-            warnings.warn(
-                '\nEarly stopping conditioned on metric `%s` '
-                'which is not available. Available metrics are: %s' %
-                (self.monitor, ','.join(list(logs.keys()))), RuntimeWarning
-            )
-        return monitor_value
+            print('\nIteration %i: early stopping\nBest metric value: %.4f' % (self.stopped_iter + 1, self.best))
