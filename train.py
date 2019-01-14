@@ -81,7 +81,7 @@ nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
 --val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL --nbepochs 2 \
---norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --early_stopping 5000
+--norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --early_stopping 10000
 
 ##########
 # TO DO: #
@@ -100,6 +100,7 @@ python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDIC
  - pretrain model on Mjsynth dataset;
  - show output of STN after training (biliniar interpolation layer);
  - finish preprocessing for IAM dataset (insert in Readf function);
+ - fix prediction script;
 
 """
 

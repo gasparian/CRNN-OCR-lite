@@ -647,7 +647,7 @@ def coords2img(coords, dotSize=4, img_size=(64,64), offset=20):
 
     return {'img':img, 'scaleX':scaleX, 'scaleY':scaleY, 'start_point': start_point}
 
-def padd(img, length_bins=[], height_bins=[], pad=True, left_offset=10):
+def padd(img, length_bins=[], height_bins=[], pad=True, left_offset=5):
     for axis, bins in zip([1, 0], [length_bins, height_bins]):
         if bins is not None:
             if type(bins) == int and img.shape[axis] < bins:
