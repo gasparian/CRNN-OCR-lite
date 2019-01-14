@@ -69,8 +69,9 @@ class CRNN:
         # Spatial transformer part
         if self.STN:
             x = STN(inputs, sampling_size=self.shape[:2]) #100x32x1
-
-        x = ZeroPadding2D(padding=(2, 2))(x) #104x36x1
+            x = ZeroPadding2D(padding=(2, 2))(x) #104x36x1
+        else:
+            x = ZeroPadding2D(padding=(2, 2))(inputs) #104x36x1
         x = self.depthwise_conv_block(x, 64, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 128, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=(2, 2))  #52x18x256
@@ -843,6 +844,7 @@ class LR_Schedule(LR_Updater):
 
     def __init__(self, schedule={}):
         self.schedule = schedule
+        self.current_lr = 0
         self.cycle_iterations = 0
         super().__init__()
 
@@ -850,9 +852,96 @@ class LR_Schedule(LR_Updater):
         self.cycle_iterations += 1
         for k, v in self.schedule.items():
             if self.cycle_iterations < k:
-                return v
+                if self.current_lr != v:
+                    self.current_lr = v
+                    return v
         
     def on_train_begin(self, logs={}):
         super().on_train_begin(logs={}) #changed to {} to fix plots after going from 1 to mult. lr
         self.cycle_iterations = 0.
         self.max_lr = K.get_value(self.model.optimizer.lr)
+
+class EarlyStoppingIter(Callback):
+
+    def __init__(self,
+                 monitor='loss',
+                 min_delta=0,
+                 patience=5000,
+                 verbose=0,
+                 mode='auto',
+                 baseline=None,
+                 restore_best_weights=False):
+        super(EarlyStoppingIter, self).__init__()
+
+        self.monitor = monitor
+        self.baseline = baseline
+        self.patience = patience
+        self.verbose = verbose
+        self.min_delta = min_delta
+        self.stopped_iter = 0
+        self.restore_best_weights = restore_best_weights
+        self.cycle_iterations = 0
+        self.best_weights = None
+
+        if mode not in ['auto', 'min', 'max']:
+            warnings.warn('\nEarlyStopping mode %s is unknown, '
+                          'fallback to auto mode.' % mode,
+                          RuntimeWarning)
+            mode = 'auto'
+
+        if mode == 'min':
+            self.monitor_op = np.less
+        elif mode == 'max':
+            self.monitor_op = np.greater
+        else:
+            if 'acc' in self.monitor:
+                self.monitor_op = np.greater
+            else:
+                self.monitor_op = np.less
+
+        if self.monitor_op == np.greater:
+            self.min_delta *= 1
+        else:
+            self.min_delta *= -1
+
+    def on_train_begin(self, logs=None):
+        # Allow instances to be re-used
+        self.stopped_iter = 0
+        if self.baseline is not None:
+            self.best = self.baseline
+        else:
+            self.best = np.Inf if self.monitor_op == np.less else -np.Inf
+
+    def on_batch_end(self, batch, logs=None):
+        self.cycle_iterations += 1
+        if self.cycle_iterations % self.patience == 0:
+            current = self.get_monitor_value(logs)
+            if current is None:
+                return
+
+            if self.monitor_op(current - self.min_delta, self.best):
+                self.best = current
+                if self.restore_best_weights:   
+                    self.best_weights = self.model.get_weights()
+            else:
+                self.stopped_iter = self.cycle_iterations
+                self.model.stop_training = True
+                if self.restore_best_weights:
+                    if self.verbose > 0:
+                        print('\nRestoring model weights from the end of '
+                              'the best epoch')
+                    self.model.set_weights(self.best_weights)
+
+    def on_train_end(self, logs=None):
+        if self.stopped_iter > 0 and self.verbose > 0:
+            print('\nIteration %i: early stopping' % (self.stopped_iter + 1))
+
+    def get_monitor_value(self, logs):
+        monitor_value = logs.get(self.monitor)
+        if monitor_value is None:
+            warnings.warn(
+                '\nEarly stopping conditioned on metric `%s` '
+                'which is not available. Available metrics are: %s' %
+                (self.monitor, ','.join(list(logs.keys()))), RuntimeWarning
+            )
+        return monitor_value

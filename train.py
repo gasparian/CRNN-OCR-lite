@@ -22,15 +22,25 @@ https://github.com/meijieru/crnn.pytorch
 https://github.com/sbillburg/CRNN-with-STN/blob/master/CRNN_with_STN.py
 https://github.com/keras-team/keras/blob/master/examples/image_ocr.py
 https://github.com/keras-team/keras-applications/blob/master/keras_applications/mobilenet.py
+
+CTC:
+https://distill.pub/2017/ctc/
+https://towardsdatascience.com/intuitively-understanding-connectionist-temporal-classification-3797e43a86c
+
 Sliced RNN:
 https://github.com/zepingyu0512/srnn/blob/master/SRNN.py
+
 Attention block:
 https://github.com/philipperemy/keras-attention-mechanism.git
+
 Spatial transformer network:
 https://github.com/oarriaga/STN.keras
+https://arxiv.org/pdf/1506.02025.pdf
+https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
+
 
 ###############################################################################################
-# LOGS:
+#                                          LOGS:                                              #
 ###############################################################################################
 
  - casual convs: 8857k params; 16 epochs, 500k training examples: ctc_loss - ~0.91
@@ -46,6 +56,10 @@ https://github.com/oarriaga/STN.keras
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname imlist.txt \
 --save_path /data/data/OCR/data --model_name OCR_mjsynth_test --nbepochs 2 \
 --norm --mjsynth --opt sgd --time_dense_size 128 --lr 0.002 --batch_size 64 --max_train_length 10000
+
+python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
+--val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_test --nbepochs 2 \
+--norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --lr_schedule --early_stopping 200
 
 Check pretrained model init:
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname imlist.txt \
@@ -67,19 +81,25 @@ nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
 --val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL --nbepochs 2 \
---norm --mjsynth --opt sgd --time_dense_size 128 --lr .0001 --batch_size 64 --lr_schedule --STN
+--norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --early_stopping 5000
 
 ##########
 # TO DO: #
 ##########
 
- - pretrain model on Mjsynth dataset;
- - make deslant algorithm;
- - finish preprocessing for IAM dataset (insert in Readf function);
  - train model with IAM dataset with weights from mjsynth model;
  - check prediction and add WER/CER metrics inside the predict.py;
  - problem with N batches in inference mode - why it's need to multiply by 2 the number of steps?;
  - add GPU / CPU options in predict.py
+
+################
+# IN PROGRESS: #
+################
+
+ - add inside epoch early-stopping;
+ - pretrain model on Mjsynth dataset;
+ - show output of STN after training (biliniar interpolation layer);
+ - finish preprocessing for IAM dataset (insert in Readf function);
 
 """
 
@@ -106,6 +126,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--opt', type=str, default="sgd")
     parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--early_stopping', type=int, default=0)
     parser.add_argument('--norm', action='store_true')
     parser.add_argument('--mjsynth', action='store_true')
     parser.add_argument('--GRU', action='store_true')
@@ -195,14 +216,11 @@ if __name__ == '__main__':
     callbacks_list = []
     callbacks_list.append(ModelCheckpoint(filepath=save_path+'/%s/checkpoint_weights.h5'%model_name, verbose=1, 
                                           save_best_only=True, save_weights_only=True))
-    if lr_schedule:
+    if lr_schedule and opt == "sgd":
         if mjsynth:
             schedule = {
-                600 : 0.1,
-                train_steps // 4 : 0.002,
-                train_steps // 2 : 0.001,
-                train_steps : 0.0005,
-                train_steps * nbepochs : lr
+                train_steps : lr,
+                train_steps * nbepochs : lr / 10
             }
         else:
             # edit this schedule accroding to IAM train dataset
@@ -211,6 +229,10 @@ if __name__ == '__main__':
             }
 
         callbacks_list.append(LR_Schedule(schedule))
+
+    if early_stopping:
+        callbacks_list.append(EarlyStoppingIter(monitor='loss', min_delta=.0001, patience=early_stopping,
+                                            verbose=1, restore_best_weights=True, mode="auto"))
 
     H = model.fit_generator(
         generator=reader.run_generator(train, downsample_factor=2**init_model.pooling_counter_h),

@@ -15,6 +15,8 @@ from tqdm import tqdm
 
 from utils import padd, get_lexicon
 
+# python3 IAM_preprocessing.py -p /home/data/IAM -np /home/data/IAM_processed
+
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Process IAM dataset')
@@ -65,7 +67,7 @@ if __name__ == "__main__":
                     img_name = word.attrib['id'].split('-')
                     img_name = img_name[0]+'/'+'-'.join(img_name[:2])+'/'+'-'.join(img_name)+'.png'
 
-                    img = cv2.imread(path + 'words/' + img_name)
+                    img = cv2.imread(path + '/words/' + img_name)
                     try:
                         d[word.attrib['id']] = text
                         lengths[word.attrib['id']] = img.shape[1]
@@ -75,16 +77,16 @@ if __name__ == "__main__":
                     target[word.attrib['id']] = make_target(text)
 
                     if length_bins is None and height_bins is None:
-                        copyfile(path+'words/'+img_name, path+new_path+'/'+word.attrib['id']+'.png')
+                        copyfile(path+'/words/'+img_name, path+new_path+'/'+word.attrib['id']+'.png')
                         c += 1
-                        continue             
+                        continue
 
-                    img = padd(img, length_bins=length_bins, height_bins=height_bins, pad=pad, left_offset=10)
-                    imsave(path+new_path+'/%s.png' % word.attrib['id'], img.astype(np.uint8))
+                    img = padd(img, length_bins=length_bins, height_bins=height_bins, pad=pad, left_offset=5)
+                    imsave(new_path+'/%s.png' % word.attrib['id'], img.astype(np.uint8))
                     c += 1
 
     print(" [INFO] number of instances: %s" % c)
-    pickle.dump(d, open(path+new_path+'/dict.pickle.dat', 'wb'))
-    pickle.dump(classes, open(path+new_path+'/classes.pickle.dat', 'wb'))
-    pickle.dump(lengths, open(path+new_path+'/lengths.pickle.dat', 'wb'))
-    pickle.dump(target, open(path+new_path+'/target.pickle.dat', 'wb'))
+    pickle.dump(d, open(new_path+'/dict.pickle.dat', 'wb'))
+    pickle.dump(classes, open(new_path+'/classes.pickle.dat', 'wb'))
+    pickle.dump(lengths, open(new_path+'/lengths.pickle.dat', 'wb'))
+    pickle.dump(target, open(new_path+'/target.pickle.dat', 'wb'))
