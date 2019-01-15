@@ -915,12 +915,14 @@ class EarlyStoppingIter(Callback):
 
     def on_batch_end(self, batch, logs=None):
         self.cycle_iterations += 1
+        #skip first n iters.
         logs = logs or {}
-        for k, v in logs.items():
-            if k == self.monitor:
-                self.sum_monitor += v
+        if self.monitor not in logs:
+            return
 
-        if self.cycle_iterations % self.patience == 0:
+        self.sum_monitor += logs[self.monitor]
+
+        if (self.cycle_iterations - 1) % self.patience == 0:
             current = self.sum_monitor / self.cycle_iterations
 
             if self.monitor_op(current - self.min_delta, self.best):

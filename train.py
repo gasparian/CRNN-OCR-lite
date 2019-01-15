@@ -54,23 +54,9 @@ https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
 #######################################################
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname imlist.txt \
---save_path /data/data/OCR/data --model_name OCR_mjsynth_test --nbepochs 2 \
---norm --mjsynth --opt sgd --time_dense_size 128 --lr 0.002 --batch_size 64 --max_train_length 10000
-
-python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
---val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_test --nbepochs 2 \
---norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --lr_schedule --early_stopping 200
-
-Check pretrained model init:
-python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname imlist.txt \
 --save_path /data/data/OCR/data --model_name OCR_mjsynth_test_TL --nbepochs 2 \
 --norm --mjsynth --opt sgd --time_dense_size 128 --lr 0.002 --batch_size 64 --max_train_length 10000 \
 --pretrained_path /data/data/OCR/data/OCR_mjsynth_test/single_gpu_weights.h5
-
-python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname imlist.txt \
---save_path /data/data/OCR/data --model_name OCR_IAM_test --nbepochs 2 \
---norm --opt sgd --time_dense_size 128 --lr 0.002 --batch_size 64 \
---max_train_length 10000 --pretrained_path /data/data/OCR/data/OCR_mjsynth_test/single_gpu_weights.h5
 
 ########
 # RUN: #
@@ -80,8 +66,13 @@ docker build -t crnn_ocr:latest -f Dockerfile .
 nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data -v /data/OCR/data:/save_path -p 8000:8000 crnn_ocr
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
---val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL --nbepochs 2 \
+--val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL --nbepochs 1 \
 --norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --early_stopping 5000
+
+python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
+--val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL_2 --nbepochs 1 \
+--norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --early_stopping 20 \
+--pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL/checkpoint_weights.h5
 
 ##########
 # TO DO: #
