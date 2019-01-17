@@ -13,28 +13,21 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-from utils import padd, get_lexicon
+from utils import get_lexicon
 
-# python3 IAM_preprocessing.py -p /home/data/IAM -np /home/data/IAM_processed
+# python3 IAM_preprocessing.py -p ./data -np ./data/IAM_processed
 
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description='Process IAM dataset')
-    parser.add_argument('-p', '--path')
+
+    # in path folder should be located /words dir and /xml_data dir
+    # from original IAM dataset archive
+    parser.add_argument('-p', '--path') 
     parser.add_argument('-np', '--new_path')
     args = parser.parse_args()
     globals().update(vars(args))
 
-    """
-    #lower+upper case+punct+space
-    classes = {i:j for i, j in zip(string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation+' ', range(len(string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation)+1))}
-    #lower case only
-    #classes = {i:j for i, j in zip(string.ascii_lowercase+string.digits+string.punctuation+' ', range(len(string.ascii_lowercase+string.digits+string.punctuation)+1))}
-    #without space symbol
-    #classes = {i:j for i, j in zip(string.ascii_lowercase+string.digits+string.punctuation, range(len(string.ascii_lowercase+string.digits+string.punctuation)))}
-
-    # punct = [i for i in string.punctuation] + ["'s", "'ve", "'ll", "'am", "'re"]
-    """
     classes = {j:i for i, j in enumerate(get_lexicon())}
 
     # modified version of func. from utils
@@ -43,10 +36,11 @@ if __name__ == "__main__":
         return np.array([classes[char] if char in voc else classes['-'] for char in text])
 
     # declare constants
-    pad = True
-    counters = [2, 16] # minimum and maximum word lengths
-    height_bins = 210
-    length_bins = 600
+    resize = False
+    counters = [4, 25] # minimum and maximum word lengths
+    height = 210
+    width = 600
+    left_offset = 5
 
     try:
         rmtree(new_path)
@@ -63,27 +57,29 @@ if __name__ == "__main__":
             for i in range(len(line)):
                 word = line[i]
                 text = word.attrib['text'].lower()
-                if counters[0] <= len(text) <= counters[1]:
-                    img_name = word.attrib['id'].split('-')
-                    img_name = img_name[0]+'/'+'-'.join(img_name[:2])+'/'+'-'.join(img_name)+'.png'
+                #text filtering!
 
-                    img = cv2.imread(path + '/words/' + img_name)
-                    try:
-                        d[word.attrib['id']] = text
-                        lengths[word.attrib['id']] = img.shape[1]
-                    except:
-                        print('file not loaded')
-                        continue
-                    target[word.attrib['id']] = make_target(text)
+                img_name = word.attrib['id'].split('-')
+                img_name = img_name[0]+'/'+'-'.join(img_name[:2])+'/'+'-'.join(img_name)+'.png'
 
-                    if length_bins is None and height_bins is None:
-                        copyfile(path+'/words/'+img_name, path+new_path+'/'+word.attrib['id']+'.png')
-                        c += 1
-                        continue
+                img = cv2.imread(path + '/words/' + img_name)
+                try:
+                    d[word.attrib['id']] = text
+                    lengths[word.attrib['id']] = img.shape[1]
+                except:
+                    print('file not loaded')
+                    continue
+                target[word.attrib['id']] = make_target(text)
 
-                    img = padd(img, length_bins=length_bins, height_bins=height_bins, pad=pad, left_offset=5)
-                    imsave(new_path+'/%s.png' % word.attrib['id'], img.astype(np.uint8))
+                if length_bins is None and height_bins is None:
+                    copyfile(path+'/words/'+img_name, path+new_path+'/'+word.attrib['id']+'.png')
                     c += 1
+                    continue
+
+                if resize:
+                    img, word = open_img(path+'/words/', img_name, (height, width), True, 255)
+                    imsave(new_path+'/%s.png' % word.attrib['id'], img.astype(np.uint8))
+                c += 1
 
     print(" [INFO] number of instances: %s" % c)
     pickle.dump(d, open(new_path+'/dict.pickle.dat', 'wb'))

@@ -397,10 +397,32 @@ class DecodeCTCPred:
             results.append(text)
         return results
 
+def open_img(path, name, img_size, flag, fill=-1, mjsynth=False):
+    if mjsynth:
+        try:
+            name = re.sub(" ", "_", name.split()[0])[1:]
+        except:
+            name = name[1:-1]
+        name = path + name
+    img = cv2.imread(name)
+    img = np.array(img, dtype=np.uint8)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    if flag:
+        img_size = img_size
+    else:
+        img_size = (img_size[1], img_size[0])
+    if img.shape[1] < img_size[1]:
+        val, counts = np.unique(img, return_counts=True)
+        if fill < 0:
+            fill = val[np.where(counts == counts.max())[0][0]]
+        img = np.concatenate([img, np.full((img.shape[0], img_size[1]-img.shape[1]), fill)], axis=1)
+    img = cv2.resize(img.astype(np.uint8), (img_size[1], img_size[0]), Image.LANCZOS)
+    return img, name.split("_")[-2]
+
 class Readf:
 
-    def __init__(self, path, training_file=None, img_size=(40,40), trsh=100, normed=False, fill=255, offset=5, mjsynth=False,
-                    random_state=None, length_sort_mode='target', batch_size=32, classes=None, reorder=False, max_train_length=None):
+    def __init__(self, path, training_file=None, img_size=(40,40), trsh=100, normed=False, fill=-1, offset=5, mjsynth=False,
+                    random_state=42, length_sort_mode='target', batch_size=32, classes=None, reorder=False, max_train_length=None):
         self.trsh = trsh
         self.mjsynth = mjsynth
         self.reorder = reorder
@@ -422,11 +444,11 @@ class Readf:
         self.classes = classes
 
         lengths = get_lengths(self.names)
+        self.mean, self.std = pickle.load(open('./data/mean_std.pickle.dat', 'rb'))
         if not self.mjsynth:
             self.targets = pickle.load(open(self.path+'/target.pickle.dat', 'rb'))
             self.max_len = max([i.shape[0] for i in self.targets.values()])
         else:
-            self.mean, self.std = pickle.load(open('./data/mean_std.pickle.dat', 'rb'))
             self.max_len = max(lengths.values())
         self.blank = len(self.classes)
 
@@ -454,35 +476,13 @@ class Readf:
         c = 0
         for i, name in enumerate(names):
             if self.mjsynth:
-                try:
-                    img, word = self.open_img(name, pad=True)
-                except:
-                    continue
+                img, word = open_img(self.path, name, self.img_size, self.flag, self.fill, self.mjsynth)
             else:
                 word = self.targets[self.parse_name(name)]
             word = word.lower()
             c += 1
             Y_data[i, 0:len(word)] = self.make_target(word)
         return Y_data
-
-    def open_img(self, name, pad=True):
-        try:
-            name = re.sub(" ", "_", name.split()[0])[1:]
-        except:
-            name = name[1:-1]
-        img = cv2.imread(self.path+name)
-        img = np.array(img, dtype=np.uint8)
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        if self.flag:
-            img_size = self.img_size
-        else:
-            img_size = (self.img_size[1], self.img_size[0])
-        if pad and img.shape[1] < img_size[1]:
-            val, counts = np.unique(img, return_counts=True)
-            to_fill = val[np.where(counts == counts.max())[0][0]]
-            img = np.concatenate([img, np.full((img.shape[0], img_size[1]-img.shape[1]), to_fill)], axis=1)
-        img = cv2.resize(img, (img_size[1], img_size[0]), Image.LANCZOS)
-        return img, name.split("_")[-2]
 
     def get_blank_matrices(self):
         shape = [self.batch_size, self.img_size[1], self.img_size[0], 1]
@@ -501,36 +501,26 @@ class Readf:
         X_data, Y_data, input_length, label_length = self.get_blank_matrices()
         while True:
             for name in names:
-                if self.mjsynth:
-                    try:
-                        img, word = self.open_img(name, pad=True)
-                    except:
-                        continue
+                img, word = open_img(self.path, name, self.img_size, self.flag, self.fill, self.mjsynth)
 
+                if self.mjsynth:
                     word = word.lower()
                     source_str.append(word)
-
                     word = self.make_target(word)
-                    Y_data[i, 0:len(word)] = word
-                    label_length[i] = len(word)
 
                 else:
-                    img = cv2.imread(name)
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-
-                    word = self.parse_name(name)
+                    word = self.parse_name(name).lower()
                     source_str.append(word)
                     word = self.targets[word]
 
-                    Y_data[i, 0:len(word)] = word
-                    label_length[i] = len(word)
-
                     #invert image colors.
-                    img = cv2.bitwise_not(img)
+                    #img = cv2.bitwise_not(img)
 
-                    img = cv2.resize(img, self.img_size, Image.LANCZOS)
-                    img = cv2.threshold(img, self.trsh, 255,
-                        cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+                    # img = cv2.threshold(img, self.trsh, 255,
+                    #     cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
+
+                Y_data[i, 0:len(word)] = word
+                label_length[i] = len(word)
 
                 if self.normed:
                     img = (img - self.mean) / self.std
@@ -646,60 +636,6 @@ def coords2img(coords, dotSize=4, img_size=(64,64), offset=20):
             draw.line([(x,y), (x_n,y_n)], fill="black", width=dotSize)
 
     return {'img':img, 'scaleX':scaleX, 'scaleY':scaleY, 'start_point': start_point}
-
-def padd(img, length_bins=[], height_bins=[], pad=True, left_offset=5):
-    for axis, bins in zip([1, 0], [length_bins, height_bins]):
-        if bins is not None:
-            if type(bins) == int and img.shape[axis] < bins:
-                if pad:
-                    if axis == 1:
-                        delta = bins-img.shape[1]-left_offset
-                        if delta <= 0:
-                            continue
-                        img = np.concatenate([img, np.full((img.shape[0], delta, img.shape[-1]), 255)], axis=1)
-                        img = np.concatenate([img, np.full((img.shape[0], left_offset, img.shape[-1]), 255)], axis=1)
-                    else:
-                        delta = bins-img.shape[0]
-                        if (delta//2-1) <= 0:
-                            continue
-                        img = np.concatenate([np.full((delta//2-1, img.shape[1], img.shape[-1]), 255), img], axis=0)
-                        img = np.concatenate([img, np.full((delta-(delta//2-1), img.shape[1], img.shape[-1]), 255)], axis=0)
-                else:
-                    if axis == 1:
-                        img = cv2.resize(img, (bins, img.shape[0]), Image.LANCZOS)
-                    else:
-                        img = cv2.resize(img, (img.shape[1], bins), Image.LANCZOS)
-            elif type(bins) == list:
-                length = img.shape[axis]
-                for j in range(len(bins)-1):
-                    if bins[j] < img.shape[axis] <= ((bins[j+1] - bins[j])/2+bins[j]):
-                        length = bins[j]
-                    elif bins[j+1] == bins[-1] and bins[j+1] < img.shape[axis]:
-                        length = bins[j+1]
-                    elif ((bins[j+1] - bins[j])/2+bins[j]) < img.shape[axis] <= bins[j+1]:
-                        length = bins[j+1]
-                if pad:
-                    if axis == 1:
-                        delta = length-img.shape[1]-left_offset
-                        if delta <= 0:
-                            continue
-                        img = np.concatenate([img, np.full((img.shape[0], delta, img.shape[-1]), 255)], axis=1)
-                        img = np.concatenate([img, np.full((img.shape[0], left_offset, img.shape[-1]), 255)], axis=1)
-                    else:
-                        delta = length-img.shape[0]
-                        if (delta//2-1) <= 0:
-                            continue
-                        img = np.concatenate([np.full((delta//2-1, img.shape[1], img.shape[-1]), 255), img], axis=0)
-                        img = np.concatenate([img, np.full((delta-(delta//2-1), img.shape[1], img.shape[-1]), 255)], axis=0)
-                else:
-                    if axis == 1:
-                        img = cv2.resize(img, (length, img.shape[0]), Image.LANCZOS)
-                    else:
-                        img = cv2.resize(img, (img.shape[1], length), Image.LANCZOS)
-
-            elif img.shape[axis] != bins or img.shape[axis] > bins:
-                continue
-    return img
 
 def bbox2(img):
     rows = np.any(img, axis=1)
@@ -857,9 +793,8 @@ class LR_Schedule(LR_Updater):
                     return v
         
     def on_train_begin(self, logs={}):
-        super().on_train_begin(logs={}) #changed to {} to fix plots after going from 1 to mult. lr
+        super().on_train_begin(logs={})
         self.cycle_iterations = 0.
-        self.max_lr = K.get_value(self.model.optimizer.lr)
 
 class EarlyStoppingIter(Callback):
 

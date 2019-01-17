@@ -74,6 +74,15 @@ python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDIC
 --norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --early_stopping 20 \
 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL/checkpoint_weights.h5
 
+____________
+
+IAM:
+____________
+
+python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
+--model_name OCR_IAM_ver1 --nbepochs 50 --norm --fill 255 --opt adam --time_dense_size 128 --lr .0001 \
+--batch_size 64 --STN --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5
+
 ##########
 # TO DO: #
 ##########
@@ -107,7 +116,7 @@ if __name__ == '__main__':
     parser.add_argument('--nbepochs', type=int, default=20)
     parser.add_argument('--G', type=str, default="1")
     parser.add_argument('--trsh', type=int, default=100)
-    parser.add_argument('--fill', type=int, default=255)
+    parser.add_argument('--fill', type=int, default=-1)
     parser.add_argument('--offset', type=int, default=4)
     parser.add_argument('--random_state', type=int, default=42)
     parser.add_argument('--length_sort_mode', type=str, default='target')
@@ -170,7 +179,6 @@ if __name__ == '__main__':
 
     if val_fname:
         val = np.array(open(path+'/'+val_fname, "r").readlines())
-
     else:
         length = len(train)
         train, val = train[:int(length*train_portion)], train[int(length*train_portion):]
@@ -217,7 +225,8 @@ if __name__ == '__main__':
         else:
             # edit this schedule accroding to IAM train dataset
             schedule = {
-                train_steps * nbepochs : lr
+                train_steps : lr,
+                train_steps * nbepochs : lr / 10
             }
 
         callbacks_list.append(LR_Schedule(schedule))
