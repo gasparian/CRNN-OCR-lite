@@ -166,6 +166,7 @@ if __name__ == '__main__':
         mjsynth=mjsynth, offset=offset, fill=fill, random_state=random_state, 
         length_sort_mode=length_sort_mode, classes=classes, reorder=reorder, max_train_length=max_train_length
     )
+    
     if reorder:
         train = np.array(list(reader.names.keys()))
     else:
@@ -173,7 +174,8 @@ if __name__ == '__main__':
 
     if val_fname:
         val = np.array(open(path+'/'+val_fname, "r").readlines())
-    else:
+    
+    if not mjsynth:
         length = len(train)
         train, val = train[:int(length*train_portion)], train[int(length*train_portion):]
 

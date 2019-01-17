@@ -65,7 +65,7 @@ class CRNN:
     def get_model(self):
         self.pooling_counter_h, self.pooling_counter_w = 0, 0
         inputs = Input(name='the_input', shape=self.shape, dtype='float32') #100x32x1
-        # Spatial transformer part
+        # spatial transformer
         x = STN(inputs, sampling_size=self.shape[:2]) #100x32x1
         x = ZeroPadding2D(padding=(2, 2))(x) #104x36x1
         x = self.depthwise_conv_block(x, 64, conv_size=(3, 3), pooling=None)
@@ -407,11 +407,18 @@ def open_img(path, name, img_size, flag, fill=-1, mjsynth=False):
         img_size = img_size
     else:
         img_size = (img_size[1], img_size[0])
-    if img.shape[1] < img_size[1]:
+
+    if fill < 0:
         val, counts = np.unique(img, return_counts=True)
-        if fill < 0:
-            fill = val[np.where(counts == counts.max())[0][0]]
+        fill = val[np.where(counts == counts.max())[0][0]]
+        
+    if img.shape[1] < img_size[1]:
         img = np.concatenate([img, np.full((img.shape[0], img_size[1]-img.shape[1]), fill)], axis=1)
+        
+    if img.shape[0] < img_size[0]:
+        half = np.full(((img_size[0]-img.shape[0]) // 2, img.shape[1]), fill)
+        img = np.concatenate([half, img, half], axis=0)
+        
     img = cv2.resize(img.astype(np.uint8), (img_size[1], img_size[0]), Image.LANCZOS)
     return img, name.split("_")[-2]
 
@@ -508,6 +515,7 @@ class Readf:
                     word = self.parse_name(name).lower()
                     source_str.append(word)
                     word = self.targets[word]
+                    img = cv2.bitwise_not(img) #?
 
                 Y_data[i, 0:len(word)] = word
                 label_length[i] = len(word)
