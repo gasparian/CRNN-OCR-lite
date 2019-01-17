@@ -418,7 +418,7 @@ def open_img(path, name, img_size, flag, fill=-1, mjsynth=False):
     if img.shape[0] < img_size[0]:
         half = np.full(((img_size[0]-img.shape[0]) // 2, img.shape[1]), fill)
         img = np.concatenate([half, img, half], axis=0)
-        
+
     img = cv2.resize(img.astype(np.uint8), (img_size[1], img_size[0]), Image.LANCZOS)
     return img, name.split("_")[-2]
 
@@ -515,7 +515,7 @@ class Readf:
                     word = self.parse_name(name).lower()
                     source_str.append(word)
                     word = self.targets[word]
-                    img = cv2.bitwise_not(img) #?
+                    img = cv2.bitwise_not(img)
 
                 Y_data[i, 0:len(word)] = word
                 label_length[i] = len(word)
