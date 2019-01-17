@@ -521,8 +521,8 @@ class Readf:
                 label_length[i] = len(word)
 
                 if self.normed:
-                    img = (img - self.mean) / self.std
-                img = norm(img)
+                    img = norm(img, self.mean, self.std)
+                img = scale(img)
 
                 if img.shape[1] >= img.shape[0]:
                     img = img[::-1].T
@@ -583,8 +583,11 @@ def get_lexicon(non_intersecting_chars=False):
         return [i for i in '0123456789'+string.ascii_lowercase+'-']
     
 
-def norm(image):
+def scale(image):
     return image.astype('float32') / 255.
+
+def norm(image, mean, std):
+    return (image.astype('float32') - mean) / std
 
 def dist(a, b):
     return np.power((np.power((a[0] - b[0]), 2) + np.power((a[1] - b[1]), 2)), 1./2)
