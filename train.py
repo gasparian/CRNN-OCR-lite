@@ -67,11 +67,11 @@ nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
 --val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL --nbepochs 1 \
---norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --early_stopping 5000
+--norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --early_stopping 5000
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
 --val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL_2 --nbepochs 1 \
---norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --STN --early_stopping 20 \
+--norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --early_stopping 20 \
 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL/checkpoint_weights.h5
 
 ____________
@@ -80,26 +80,22 @@ IAM:
 ____________
 
 python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
---model_name OCR_IAM_ver1 --nbepochs 50 --norm --fill 255 --opt adam --time_dense_size 128 --lr .0001 \
---batch_size 64 --STN --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5
+--model_name OCR_IAM_ver1 --nbepochs 150 --norm --fill 255 --opt adam --time_dense_size 128 --lr .0001 \
+--batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5
 
 ##########
 # TO DO: #
 ##########
 
- - train model with IAM dataset with weights from mjsynth model;
  - check prediction and add WER/CER metrics inside the predict.py;
  - problem with N batches in inference mode - why it's need to multiply by 2 the number of steps?;
- - add GPU / CPU options in predict.py
 
 ################
 # IN PROGRESS: #
 ################
 
- - add inside epoch early-stopping;
- - pretrain model on Mjsynth dataset;
+ - train model with IAM dataset with weights from mjsynth model;
  - show output of STN after training (biliniar interpolation layer);
- - finish preprocessing for IAM dataset (insert in Readf function);
  - fix prediction script;
 
 """
@@ -131,8 +127,6 @@ if __name__ == '__main__':
     parser.add_argument('--norm', action='store_true')
     parser.add_argument('--mjsynth', action='store_true')
     parser.add_argument('--GRU', action='store_true')
-    parser.add_argument('--STN', action='store_true')
-    parser.add_argument('--lr_schedule', action='store_true')
     parser.add_argument('--reorder', action='store_true')
 
     # default values set according to mjsynth dataset rules
@@ -185,7 +179,7 @@ if __name__ == '__main__':
 
     print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(reader.classes)+1, reader.max_len))
 
-    init_model = CRNN(num_classes=len(classes)+1, shape=img_size, GRU=GRU, STN=STN,
+    init_model = CRNN(num_classes=len(classes)+1, shape=img_size, GRU=GRU,
         time_dense_size=time_dense_size, n_units=n_units, max_string_len=reader.max_len)
 
     model = init_model.get_model()
@@ -216,20 +210,6 @@ if __name__ == '__main__':
     callbacks_list = []
     callbacks_list.append(ModelCheckpoint(filepath=save_path+'/%s/checkpoint_weights.h5'%model_name, verbose=1, 
                                           save_best_only=True, save_weights_only=True))
-    if lr_schedule and opt == "sgd":
-        if mjsynth:
-            schedule = {
-                train_steps : lr,
-                train_steps * nbepochs : lr / 10
-            }
-        else:
-            # edit this schedule accroding to IAM train dataset
-            schedule = {
-                train_steps : lr,
-                train_steps * nbepochs : lr / 10
-            }
-
-        callbacks_list.append(LR_Schedule(schedule))
 
     if early_stopping:
         callbacks_list.append(EarlyStoppingIter(monitor='loss', min_delta=.0001, patience=early_stopping,

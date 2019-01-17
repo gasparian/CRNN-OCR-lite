@@ -1,16 +1,12 @@
 import pickle
-import sys
 from shutil import copyfile, rmtree
 import re
-import string
 import xml.etree.ElementTree as ET
 import os
 import argparse
 
-from imageio import imsave
 import cv2
 import numpy as np
-from PIL import Image
 from tqdm import tqdm
 
 from utils import get_lexicon
@@ -36,11 +32,7 @@ if __name__ == "__main__":
         return np.array([classes[char] if char in voc else classes['-'] for char in text])
 
     # declare constants
-    resize = False
-    counters = [4, 25] # minimum and maximum word lengths
-    height = 210
-    width = 600
-    left_offset = 5
+    counters = [2, 30] # minimum and maximum word lengths
 
     try:
         rmtree(new_path)
@@ -57,29 +49,21 @@ if __name__ == "__main__":
             for i in range(len(line)):
                 word = line[i]
                 text = word.attrib['text'].lower()
-                #text filtering!
+                if counters[0] <= len(re.sub("[^a-zA-Z0-9_]", "", text)) <= counters[1]:
+                    img_name = word.attrib['id'].split('-')
+                    img_name = img_name[0]+'/'+'-'.join(img_name[:2])+'/'+'-'.join(img_name)+'.png'
 
-                img_name = word.attrib['id'].split('-')
-                img_name = img_name[0]+'/'+'-'.join(img_name[:2])+'/'+'-'.join(img_name)+'.png'
+                    img = cv2.imread(path + '/words/' + img_name)
+                    try:
+                        d[word.attrib['id']] = text
+                        lengths[word.attrib['id']] = img.shape[1]
+                    except:
+                        print("can't load file!")
+                        continue
+                    target[word.attrib['id']] = make_target(text)
 
-                img = cv2.imread(path + '/words/' + img_name)
-                try:
-                    d[word.attrib['id']] = text
-                    lengths[word.attrib['id']] = img.shape[1]
-                except:
-                    print('file not loaded')
-                    continue
-                target[word.attrib['id']] = make_target(text)
-
-                if length_bins is None and height_bins is None:
-                    copyfile(path+'/words/'+img_name, path+new_path+'/'+word.attrib['id']+'.png')
+                    copyfile(path+'/words/'+img_name, new_path+'/'+word.attrib['id']+'.png')
                     c += 1
-                    continue
-
-                if resize:
-                    img, word = open_img(path+'/words/', img_name, (height, width), True, 255)
-                    imsave(new_path+'/%s.png' % word.attrib['id'], img.astype(np.uint8))
-                c += 1
 
     print(" [INFO] number of instances: %s" % c)
     pickle.dump(d, open(new_path+'/dict.pickle.dat', 'wb'))

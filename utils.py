@@ -38,14 +38,13 @@ def custom_load_model(path, model_name="model.json", weights="model.h5"):
 
 class CRNN:
 
-    def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), time_dense_size=128, GRU=False, n_units=256, STN=False):
+    def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), time_dense_size=128, GRU=False, n_units=256):
 
         self.num_classes = num_classes
         self.shape = shape
         self.max_string_len = max_string_len
         self.n_units = n_units
         self.GRU = GRU
-        self.STN = STN
         self.time_dense_size = time_dense_size
 
     def depthwise_conv_block(self, inputs, pointwise_conv_filters, conv_size=(3, 3), pooling=None):
@@ -67,11 +66,8 @@ class CRNN:
         self.pooling_counter_h, self.pooling_counter_w = 0, 0
         inputs = Input(name='the_input', shape=self.shape, dtype='float32') #100x32x1
         # Spatial transformer part
-        if self.STN:
-            x = STN(inputs, sampling_size=self.shape[:2]) #100x32x1
-            x = ZeroPadding2D(padding=(2, 2))(x) #104x36x1
-        else:
-            x = ZeroPadding2D(padding=(2, 2))(inputs) #104x36x1
+        x = STN(inputs, sampling_size=self.shape[:2]) #100x32x1
+        x = ZeroPadding2D(padding=(2, 2))(x) #104x36x1
         x = self.depthwise_conv_block(x, 64, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 128, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=(2, 2))  #52x18x256
@@ -513,12 +509,6 @@ class Readf:
                     source_str.append(word)
                     word = self.targets[word]
 
-                    #invert image colors.
-                    #img = cv2.bitwise_not(img)
-
-                    # img = cv2.threshold(img, self.trsh, 255,
-                    #     cv2.THRESH_BINARY | cv2.THRESH_OTSU)[1]
-
                 Y_data[i, 0:len(word)] = word
                 label_length[i] = len(word)
 
@@ -697,104 +687,6 @@ def save_model_json(model, save_path, model_name):
     model_json = model.to_json()
     with open(save_path+'/'+model_name+"/model.json", "w") as json_file:
         json_file.write(model_json)
-
-def save_single_model(model, path):
-    sinlge_model = model.layers[-2]
-    sinlge_model.save(path+'/single_gpu_model.hdf5')
-    model_json = sinlge_model.to_json()
-    with open(path+"/single_gpu_model.json", "w") as json_file:
-        json_file.write(model_json)
-    sinlge_model.save_weights(path+"/single_gpu_weights.h5")
-
-def SMA(data, dt=1, ave_t=100):
-    m = data.shape[0]
-    ave = int(ave_t / dt)
-    data_ave = np.empty((data.shape))[ave_t:]
-    for i, j in enumerate(range(ave, m)):
-        data_ave[i] = np.nansum(data[(j - ave):j], axis=0) / ave
-    return data_ave
-
-def EMA(data, alpha=0.0002):
-    k = 1
-    length = data.shape[0]
-    if data.ndim > 1: 
-        av = np.empty((length, data.shape[1]))
-        av[0, :] = data[0, :]
-        while k < length:
-            av[k, :] = av[k-1, :] + alpha * (data[k] - av[k-1, :])
-            k += 1
-    else:
-        av = np.empty((length,)) 
-        av[0] = data[0]
-        while k < length:
-            av[k] = av[k-1] + alpha * (data[k] - av[k-1])
-            k += 1
-    return av
-
-class LossHistory(Callback):
-    def on_train_begin(self, logs={}):
-        self.losses = {"loss":[], "val_loss":[]}
-
-    def on_batch_end(self, batch, logs={}):
-        self.losses["loss"].append(logs.get('loss'))
-        self.losses["val_loss"].append(logs.get('val_loss'))
-
-class LR_Updater(Callback):
-
-    def __init__(self):
-        '''
-        iterations = dataset size / batch size
-        epochs = pass through full training dataset
-        '''
-        self.trn_iterations = 0.
-        self.history = {}
-
-    def setRate(self):
-        return K.get_value(self.model.optimizer.lr)
-
-    def on_train_begin(self, logs={}):
-        self.trn_iterations = 0.
-        logs = logs or {}
-
-    def on_batch_end(self, batch, logs=None):
-        logs = logs or {}
-        self.trn_iterations += 1
-        K.set_value(self.model.optimizer.lr, self.setRate())
-        self.history.setdefault('lr', []).append(K.get_value(self.model.optimizer.lr))
-        self.history.setdefault('iterations', []).append(self.trn_iterations)
-        for k, v in logs.items():
-            self.history.setdefault(k, []).append(v)
-
-    def plot_lr(self):
-        plt.xlabel("iterations")
-        plt.ylabel("learning rate")
-        plt.plot(self.history['iterations'], self.history['lr'])
-
-    def plot(self, n_skip=10):
-        plt.xlabel("learning rate (log scale)")
-        plt.ylabel("loss")
-        plt.plot(self.history['lr'][n_skip:-5], self.history['loss'][n_skip:-5])
-        plt.xscale('log')
-
-class LR_Schedule(LR_Updater):
-
-    def __init__(self, schedule={}):
-        self.schedule = schedule
-        self.current_lr = 0
-        self.cycle_iterations = 0
-        super().__init__()
-
-    def setRate(self):
-        self.cycle_iterations += 1
-        for k, v in self.schedule.items():
-            if self.cycle_iterations < k:
-                if self.current_lr != v:
-                    self.current_lr = v
-                    return v
-        
-    def on_train_begin(self, logs={}):
-        super().on_train_begin(logs={})
-        self.cycle_iterations = 0.
 
 class EarlyStoppingIter(Callback):
 
