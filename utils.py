@@ -28,14 +28,6 @@ from keras import optimizers
 from keras import backend as K
 import tensorflow as tf
 
-def custom_load_model(path, model_name="model.json", weights="model.h5"):
-    json_file = open(path+"/"+model_name, 'r')
-    loaded_model_json = json_file.read()
-    json_file.close()
-    loaded_model = model_from_json(loaded_model_json)
-    loaded_model.load_weights(path+"/"+weights)
-    return loaded_model
-
 class CRNN:
 
     def __init__(self, num_classes=97, max_string_len=23, shape=(40,40,1), time_dense_size=128, GRU=False, n_units=256):
@@ -70,9 +62,9 @@ class CRNN:
         x = ZeroPadding2D(padding=(2, 2))(x) #104x36x1
         x = self.depthwise_conv_block(x, 64, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 128, conv_size=(3, 3), pooling=None)
-        x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=(2, 2))  #52x18x256
+        x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=(2, 2)) #52x18x256
         x = self.depthwise_conv_block(x, 256, conv_size=(3, 3), pooling=None)
-        x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=(1, 2))  #52x9x512
+        x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=(1, 2)) #52x9x512
         x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=None)
         x = self.depthwise_conv_block(x, 512, conv_size=(3, 3), pooling=None)
 
@@ -130,7 +122,7 @@ class BilinearInterpolation(Layer):
     [3]  https://github.com/EderSantana/seya
     """
 
-    def __init__(self, output_size, **kwargs):
+    def __init__(self, output_size=(100, 32), **kwargs):
         self.output_size = output_size
         super(BilinearInterpolation, self).__init__(**kwargs)
 
@@ -238,6 +230,11 @@ class BilinearInterpolation(Layer):
         interpolated_image = K.reshape(interpolated_image, new_shape)
         return interpolated_image
 
+    def get_config(self):
+        config = super().get_config()
+        config['output_size'] = self.output_size
+        return config
+
 def get_initial_weights(output_size):
     b = np.zeros((2, 3), dtype='float32')
     b[0, 0] = 1
@@ -299,30 +296,6 @@ def normalized_edit_distance(y_pred, y_true):
         mean_distance += levenshtein(y0, y) / (len(y) * length)
     return mean_distance
 
-class EditDistances(Callback):
-
-    def __init__(self, inverse_classes, validation_data, validation_steps):
-        self.validation_data = validation_data
-        self.validation_steps = validation_steps
-        self.inverse_classes = inverse_classes
-
-    def on_train_begin(self, logs={}):
-        self.edit_distance = []
-        self.normalized_edit_distance = []
-
-    def on_epoch_end(self, epoch, logs={}):
-        predictor = init_predictor(self.model)
-        val_predict = predictor.predict_generator(self.validation_data[0], steps=self.validation_steps*2)
-        val_predict = decode_predict_ctc(out=val_predict, top_paths=1, beam_width=3, inverse_classes=self.inverse_classes)
-        targ = [labels_to_text(t, inverse_classes=self.inverse_classes) for t in self.validation_data[1]]
-        val_edit_distance = edit_distance(val_predict, targ)
-        val_normalized_edit_distance = normalized_edit_distance(val_predict, targ)
-        self.edit_distance.append(val_edit_distance)
-        self.normalized_edit_distance.append(val_normalized_edit_distance)
-        print(" — val_edit_distance: %f — val_normalized_edit_distance %f" % (val_edit_distance, val_normalized_edit_distance))
-
-        return
-
 def load_model_custom(path, weights="model"):
     json_file = open(path+'/model.json', 'r')
     loaded_model_json = json_file.read()    
@@ -346,27 +319,17 @@ def labels_to_text(labels, inverse_classes=None):
             ret.append(str(inverse_classes[c]))
     return "".join(ret)
 
-def decode_predict_ctc(out=None, top_paths=1, beam_width=3, inverse_classes=None):
-    results = []
-    greedy = False
-    if top_paths == 1:
-        greedy = True
-    if beam_width < top_paths:
-        beam_width = top_paths
-    for i in range(out.shape[0]):
-        text = ""
-        for j in range(top_paths):
-            inp = np.expand_dims(out[i], axis=0)
-            labels = K.get_value(K.ctc_decode(inp, input_length=np.ones(inp.shape[0])*inp.shape[1],
-                               greedy=greedy, beam_width=beam_width, top_paths=top_paths)[0][j])[0]
-            text += labels_to_text(labels, inverse_classes)
-        results.append(text)
-    return results
+def load_custom_model(model_path, model_name='/model.json', weights="/final_weights.h5"):
+    json_file = open(model_path+model_name, 'r')
+    loaded_model_json = json_file.read()    
+    json_file.close()
+    model = model_from_json(loaded_model_json, custom_objects={'BilinearInterpolation': BilinearInterpolation})
+    model.load_weights(model_path+weights)
+    return model
 
 class DecodeCTCPred:
 
-    def __init__(self, predictor, top_paths=1, beam_width=5, inverse_classes=None):
-        self.predictor = predictor
+    def __init__(self, top_paths=1, beam_width=5, inverse_classes=None):
         self.top_paths = top_paths
         self.beam_width = beam_width
         self.inverse_classes = inverse_classes
@@ -374,39 +337,36 @@ class DecodeCTCPred:
     def labels_to_text(self, labels):
         ret = []
         for c in labels:
-            if c == len(self.inverse_classes):
+            if c == len(self.inverse_classes) or c == -1:
                 ret.append("")
             else:
                 ret.append(self.inverse_classes[c])
         return "".join(ret)
 
-    def decode(self, a):
-        c = np.expand_dims(a, axis=0)
-        out = self.predictor.predict(c)
+    def decode(self, result):
         results = []
         if self.beam_width < self.top_paths:
           self.beam_width = self.top_paths
-        for i in range(self.top_paths):
+        for out in result:
+            out = np.expand_dims(out, axis=0)
             labels = K.get_value(K.ctc_decode(out, input_length=np.ones(out.shape[0])*out.shape[1],
-                               greedy=False, beam_width=self.beam_width, top_paths=self.top_paths)[0][i])[0]
+                               greedy=False, beam_width=self.beam_width, top_paths=self.top_paths)[0][0])[0]
             text = self.labels_to_text(labels)
             results.append(text)
         return results
 
-def open_img(path, name, img_size, flag, fill=-1, mjsynth=False):
+def open_img(path, img_size, fill=-1, name="", mjsynth=False):
     if mjsynth:
         try:
             name = re.sub(" ", "_", name.split()[0])[1:]
         except:
             name = name[1:-1]
         name = path + name
+
     img = cv2.imread(name)
     img = np.array(img, dtype=np.uint8)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    if flag:
-        img_size = img_size
-    else:
-        img_size = (img_size[1], img_size[0])
+    img = img[::-1].T
 
     if fill < 0:
         val, counts = np.unique(img, return_counts=True)
@@ -420,7 +380,7 @@ def open_img(path, name, img_size, flag, fill=-1, mjsynth=False):
         img = np.concatenate([half, img, half], axis=0)
 
     img = cv2.resize(img.astype(np.uint8), (img_size[1], img_size[0]), Image.LANCZOS)
-    return img, name.split("_")[-2]
+    return img, name.split("_")[-2].lower()
 
 class Readf:
 
@@ -431,8 +391,7 @@ class Readf:
         self.reorder = reorder
         self.path = path
         self.batch_size = batch_size
-        self.img_size = img_size
-        self.flag = False
+        self.img_size = (img_size[1], img_size[0], img_size[2])
         self.offset = offset
         self.fill = fill
         self.normed = normed
@@ -448,6 +407,7 @@ class Readf:
 
         lengths = get_lengths(self.names)
         self.mean, self.std = pickle.load(open('./data/mean_std.pickle.dat', 'rb'))
+        #self.mean, self.std = #<<<<<<<<<<<<<<<<<<<<<<<<
         if not self.mjsynth:
             self.targets = pickle.load(open(self.path+'/target.pickle.dat', 'rb'))
             self.max_len = max([i.shape[0] for i in self.targets.values()])
@@ -478,20 +438,22 @@ class Readf:
         Y_data = np.full([len(names), self.max_len], self.blank)
         c = 0
         for i, name in enumerate(names):
-            if self.mjsynth:
-                img, word = open_img(self.path, name, self.img_size, self.flag, self.fill, self.mjsynth)
-            else:
-                word = self.targets[self.parse_name(name)]
-            word = word.lower()
+            try:
+                img, word = open_img(self.path, self.img_size, self.fill, name, self.mjsynth)
+                if self.mjsynth:
+                    word = self.make_target(word)
+                else:
+                    word = self.parse_name(name).lower()
+                    word = self.targets[word]
+            except:
+                continue
+
+            Y_data[i, 0:len(word)] = word
             c += 1
-            Y_data[i, 0:len(word)] = self.make_target(word)
         return Y_data
 
     def get_blank_matrices(self):
-        shape = [self.batch_size, self.img_size[1], self.img_size[0], 1]
-        if not self.flag:
-            shape[1], shape[2] = shape[2], shape[1]
-
+        shape = [self.batch_size, self.img_size[0], self.img_size[1], 1]
         X_data = np.empty(shape)
         Y_data = np.full([self.batch_size, self.max_len], self.blank)
         input_length = np.ones((self.batch_size, 1))
@@ -504,10 +466,12 @@ class Readf:
         X_data, Y_data, input_length, label_length = self.get_blank_matrices()
         while True:
             for name in names:
-                img, word = open_img(self.path, name, self.img_size, self.flag, self.fill, self.mjsynth)
+                try:
+                    img, word = open_img(self.path, self.img_size, self.fill, name, self.mjsynth)
+                except:
+                    continue
 
                 if self.mjsynth:
-                    word = word.lower()
                     source_str.append(word)
                     word = self.make_target(word)
 
@@ -522,18 +486,8 @@ class Readf:
 
                 if self.normed:
                     img = norm(img, self.mean, self.std)
-                img = scale(img)
 
-                if img.shape[1] >= img.shape[0]:
-                    img = img[::-1].T
-                    if not self.flag:
-                        self.img_size = (self.img_size[1], self.img_size[0])
-                        self.flag = True
-
-                if self.flag:
-                    input_length[i] = (self.img_size[1]+4) // downsample_factor - 2
-                else:
-                    input_length[i] = (self.img_size[0]+4) // downsample_factor - 2
+                input_length[i] = (self.img_size[0]+4) // downsample_factor - 2
 
                 img = img[:,:,np.newaxis]
 
@@ -578,121 +532,11 @@ def get_lengths(names):
 def get_lexicon(non_intersecting_chars=False):
     if non_intersecting_chars:
         return list(set([i for i in '0123456789'+string.ascii_lowercase+'AaBbDdEeFfGgHhLlMmNnQqRrTt'+'-']))
-        #return [i for i in string.ascii_lowercase+string.ascii_uppercase+string.digits+string.punctuation+' ']
     else:
         return [i for i in '0123456789'+string.ascii_lowercase+'-']
-    
-
-def scale(image):
-    return image.astype('float32') / 255.
 
 def norm(image, mean, std):
-    return (image.astype('float32') - mean) / std
-
-def dist(a, b):
-    return np.power((np.power((a[0] - b[0]), 2) + np.power((a[1] - b[1]), 2)), 1./2)
-
-def coords2img(coords, dotSize=4, img_size=(64,64), offset=20):
-
-    def min_max(coords):
-        max_x, min_x = int(np.max(np.concatenate([coord[:, 0] for coord in coords]))), int(np.min(np.concatenate([coord[:, 0] for coord in coords]))) 
-        max_y, min_y = int(np.max(np.concatenate([coord[:, 1] for coord in coords]))), int(np.min(np.concatenate([coord[:, 1] for coord in coords])))
-        return min_x, max_x, min_y, max_y
-    
-    offset += dotSize // 2
-    min_dists, dists = {}, [[] for i in range(len(coords))]
-    for i, line in enumerate(coords):
-        for point in line:
-            dists[i].append(dist([0, 0], point))
-        min_dists[min(dists[i])] = i
-            
-    min_dist = min(list(min_dists.keys()))
-    min_index = min_dists[min_dist]
-    start_point = coords[min_index][dists[min_index].index(min_dist)].copy()
-    for i in range(len(coords)):
-        coords[i] -= start_point
-    
-    min_x, max_x, min_y, max_y = min_max(coords) 
-    scaleX = ((max_x - min_x) / (img_size[0]-(offset*2-1)))
-    scaleY = ((max_y - min_y) / (img_size[1]-(offset*2-1)))
-    for line in coords:
-        line[:, 0] = line[:, 0] / scaleX
-        line[:, 1] = line[:, 1] / scaleY
-
-    min_x, max_x, min_y, max_y = min_max(coords)
-        
-    w = max_x-min_x+offset*2
-    h = max_y-min_y+offset*2
-
-    img = Image.new("RGB", (w, h), "white")
-    draw = ImageDraw.Draw(img)
-
-    start = 1
-    for i in range(len(coords)):
-        for j in range(len(coords[i]))[start:]:
-            x, y = coords[i][j-1]
-            x_n, y_n = coords[i][j]
-            x -= min_x-offset; y -= min_y-offset
-            x_n -= min_x-offset; y_n -= min_y-offset
-            draw.line([(x,y), (x_n,y_n)], fill="black", width=dotSize)
-
-    return {'img':img, 'scaleX':scaleX, 'scaleY':scaleY, 'start_point': start_point}
-
-def bbox2(img):
-    rows = np.any(img, axis=1)
-    cols = np.any(img, axis=0)
-    rmin, rmax = np.where(rows)[0][[0, -1]]
-    cmin, cmax = np.where(cols)[0][[0, -1]]
-
-    rmin = (np.where(img[rmin])[0][0], rmin)
-    rmax = (np.where(img[rmax])[0][0], rmax)
-    
-    cmin = (cmin, np.where(img[:, cmin])[0][0])
-    cmax = (cmax, np.where(img[:, cmax])[0][0])
-    
-    return np.array((rmin, rmax, cmin, cmax))
-
-def set_offset_monochrome(img, offset=20, fill=0):
-
-    shape = np.array(img.shape)
-    if img.ndim > 2:
-        box = bbox2(img.sum(axis=2))
-    else:
-        box = bbox2(img)
-    box_y_min, box_y_max = np.min(box[:, 1]), np.max(box[:, 1])
-    box_x_min, box_x_max = np.min(box[:, 0]), np.max(box[:, 0])
-    
-    y1, y2 = box_y_min - offset, box_y_max + offset
-    x1, x2 = box_x_min - offset, box_x_max + offset
-    
-    if x1 < 0:
-        x1 *= -1
-        if img.ndim > 2:
-            img = np.concatenate([np.full((img.shape[0], x1, img.shape[-1]), fill), img], axis=1)
-        else:
-            img = np.concatenate([np.full((img.shape[0], x1), fill), img], axis=1)
-        x1 = 0
-    if x2 > shape[1]:
-        if img.ndim > 2:
-            img = np.concatenate([img, np.full((img.shape[0], x2-shape[1], img.shape[-1]), fill)], axis=1)
-        else:
-            img = np.concatenate([img, np.full((img.shape[0], x2-shape[1]), fill)], axis=1)
-        x2 = -1
-    if y1 < 0:
-        y1 *= -1
-        if img.ndim > 2:
-            img = np.concatenate([np.full((y1, img.shape[1], img.shape[-1]), fill), img], axis=0)
-        else:
-            img = np.concatenate([np.full((y1, img.shape[1]), fill), img], axis=0)
-        y1 = 0
-    if y2 > shape[0]:
-        if img.ndim > 2:
-            img = np.concatenate([img, np.full((y2-shape[0], img.shape[1], img.shape[-1]), fill)], axis=0)
-        else:
-            img = np.concatenate([img, np.full((y2-shape[0], img.shape[1]), fill)], axis=0)
-        y2 = -1
-        
-    return img[y1:y2, x1:x2].astype(np.uint8)
+    return (image.astype('float32') - mean.mean()) / std.mean() / 255. # <<<<<<<<<<<<<
 
 def save_model_json(model, save_path, model_name):
     model_json = model.to_json()

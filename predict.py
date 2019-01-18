@@ -1,22 +1,40 @@
-import sys
 import os
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 import argparse
 import pickle
 import time
 
+from tqdm import tqdm
 from imageio import imsave
 from scipy import misc
 import numpy as np
 from PIL import Image
 import cv2
 
+"""
+Check mjsynth:
+
+python3 predict.py --G 0 --model_path /data/data/OCR/data/OCR_mjsynth_FULL_2 \
+--image_path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px \
+--val_fname annotation_test.txt --mjsynth --validate --num_instances 128
+
+Check IAM:
+
+python3 predict.py --G 0 --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
+--image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
+--validate --num_instances 128
+
+"""
+
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-p', '--model_path', type=str, required=True)
-    parser.add_argument('--image_path', type=str, required=False, default=None)
+    parser.add_argument('--model_path', type=str, required=True)
+    parser.add_argument('--image_path', type=str, required=True)
+    parser.add_argument('--val_fname', type=str, required=False, default=None)
+    parser.add_argument('--num_instances', type=int, default=1000)
     parser.add_argument('--G', type=int, default=-1)
+    parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--validate', action='store_true')
     parser.add_argument('--mjsynth', action='store_true')
 
@@ -24,15 +42,8 @@ if __name__ == '__main__':
     parser.add_argument('--imgh', type=int, default=100)
     parser.add_argument('--imgW', type=int, default=32)
 
-
     args = parser.parse_args()
     globals().update(vars(args))
-
-    if not mjsynth:
-        pad = True
-        counters = [2, 16] # minimum and maximum word lengths
-        height_bins = 210
-        length_bins = 600
 
     if G < 0:
         from tensorflow import ConfigProto, Session
@@ -44,37 +55,52 @@ if __name__ == '__main__':
         session = Session(config=device_config)
         K.set_session(session)
     else:
-        os.environ["CUDA_VISIBLE_DEVICES"] = G
+        os.environ["CUDA_VISIBLE_DEVICES"] = str(G)
 
     from keras.models import Model
     from keras.models import model_from_json, load_model
     
-    from reader import bbox2, set_offset_monochrome, norm, padd
-    from utils import custom_load_model, init_predictor, DecodeCTCPred
+    #from utils import bbox2, set_offset_monochrome, norm, padd
+    from utils import init_predictor, DecodeCTCPred, Readf, edit_distance, normalized_edit_distance, \
+                        BilinearInterpolation, get_lexicon, load_custom_model, open_img, norm
 
-    model = init_predictor(custom_load_model(model_path))
-    classes = {j:i for i, j in enumerate(lexicon)}
+
+    model = load_custom_model(model_path, model_name='/model.json', weights="/final_weights.h5")
+    model = init_predictor(model)
+    classes = {j:i for i, j in enumerate(get_lexicon())}
     inverse_classes = {v:k for k, v in classes.items()}
-    decoder = DecodeCTCPred(model, top_paths=1, beam_width=3, 
-        inverse_classes={v:k for k, v in classes.items()})
-
-    # add propper preprocessing
+    decoder = DecodeCTCPred(top_paths=1, beam_width=3, inverse_classes=inverse_classes)
 
     if validate:
-        # add reader object
-        # fix prediction and decoding
 
-        print(" [INFO] Computing edit distance metric with the best model... ")
-        indeces = np.random.randint(0, len(val), 10000)
-        predicted = model.predict_generator(reader.run_generator(val, downsample_factor=2**init_model.pooling_counter_h), steps=test_steps*2)
-        y_true = reader.get_labels(val)
-        true_text = [labels_to_text(y_true[i], inverse_classes=inverse_classes) for i in range(len(y_true[indeces]))]
-        predicted_text = decoder.decode(out=predicted[indeces], top_paths=1, beam_width=3, inverse_classes=inverse_classes)
+        img_size = (imgW, imgh) + (1,)
+        reader = Readf(
+            image_path, val_fname, img_size=img_size, trsh=100, normed=True, mjsynth=mjsynth, batch_size=batch_size,
+            offset=4, fill=255 if not mjsynth else -1, random_state=42, classes=classes
+        )
+        
+        fnames = np.array(reader.names)
+        indeces = np.random.randint(0, len(fnames), num_instances)
+        fnames = fnames[indeces]
+        steps = len(fnames) // batch_size
+        if (len(fnames) % batch_size) > 0:
+            steps += 1
+
+        print(" [INFO] Computing edit distance metric... ")
+        predicted = model.predict_generator(reader.run_generator(fnames, downsample_factor=2), steps=steps)
+        y_true = reader.get_labels(fnames)
+        true_text = [decoder.labels_to_text(y_true[i]) for i in range(len(y_true))]
+        predicted_text = decoder.decode(predicted)
+
+        print(list(zip(predicted_text[:10], true_text[:10]))) # DEBUG
+
         edit_distance_score = edit_distance(predicted_text, true_text)
         normalized_edit_distance_score = normalized_edit_distance(predicted_text, true_text)
         print(" [INFO] mean edit distance: %f ; normalized edit distance score: %f" % (edit_distance_score, normalized_edit_distance_score))
 
     else:
+
+        # fix wild images inference
 
         start_time = time.time()
 

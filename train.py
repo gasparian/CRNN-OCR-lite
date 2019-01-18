@@ -76,27 +76,48 @@ python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDIC
 
 ____________
 
-IAM:
+Mjsynth GRU
+____________
+
+python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
+--val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL_GRU --nbepochs 1 \
+--norm --mjsynth --GRU --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --early_stopping 5000
+
+python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
+--val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL_GRU_2 --nbepochs 1 \
+--norm --mjsynth --GRU --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --early_stopping 20 \
+--pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL/checkpoint_weights.h5
+
+____________
+
+IAM LSTM:
 ____________
 
 python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
 --model_name OCR_IAM_ver1 --nbepochs 150 --norm --fill 255 --opt adam --time_dense_size 128 --lr .0001 \
 --batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5
+____________
+
+IAM GRU:
+____________
+
+python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
+--model_name OCR_IAM_ver1 --nbepochs 150 --norm --fill 255 --opt adam --time_dense_size 128 --lr .0001 \
+--batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5 --GRU
 
 ##########
 # TO DO: #
 ##########
 
- - check prediction and add WER/CER metrics inside the predict.py;
- - problem with N batches in inference mode - why it's need to multiply by 2 the number of steps?;
+ - make handwritten text classifier;
+ - make two text box detectors: both for straight and hw text;
 
 ################
 # IN PROGRESS: #
 ################
 
- - train model with IAM dataset with weights from mjsynth model;
- - show output of STN after training (biliniar interpolation layer);
- - fix prediction script;
+ - correct normalization addition;
+ - retrain all with LSTM and GRU;
 
 """
 
@@ -163,10 +184,10 @@ if __name__ == '__main__':
     img_size = (imgh, imgW) + (1,)
     reader = Readf(
         path, training_fname, img_size=img_size, trsh=trsh, normed=norm,
-        mjsynth=mjsynth, offset=offset, fill=fill, random_state=random_state, 
+        mjsynth=mjsynth, offset=offset, fill=fill, random_state=random_state,  batch_size=batch_size, 
         length_sort_mode=length_sort_mode, classes=classes, reorder=reorder, max_train_length=max_train_length
     )
-    
+
     if reorder:
         train = np.array(list(reader.names.keys()))
     else:
