@@ -60,7 +60,6 @@ if __name__ == '__main__':
     from keras.models import Model
     from keras.models import model_from_json, load_model
     
-    #from utils import bbox2, set_offset_monochrome, norm, padd
     from utils import init_predictor, DecodeCTCPred, Readf, edit_distance, normalized_edit_distance, \
                         BilinearInterpolation, get_lexicon, load_custom_model, open_img, norm
 
@@ -80,19 +79,27 @@ if __name__ == '__main__':
         )
         
         fnames = np.array(reader.names)
-        indeces = np.random.randint(0, len(fnames), num_instances)
+        if not mjsynth:
+            length = len(fnames)
+            fnames = fnames[int(length*0.9):]
+
+        indeces = np.random.randint(0, len(fnames), min(num_instances, len(fnames)))
         fnames = fnames[indeces]
         steps = len(fnames) // batch_size
         if (len(fnames) % batch_size) > 0:
             steps += 1
 
         print(" [INFO] Computing edit distance metric... ")
+        start = time.time()
         predicted = model.predict_generator(reader.run_generator(fnames, downsample_factor=2), steps=steps)
         y_true = reader.get_labels(fnames)
         true_text = [decoder.labels_to_text(y_true[i]) for i in range(len(y_true))]
-        predicted_text = decoder.decode(predicted)
+        print(f" [INFO] {len(fnames)} images processed in {(time.time() - start)/1000} sec. ")
 
-        print(list(zip(predicted_text[:10], true_text[:10]))) # DEBUG
+        start = time.time()
+        predicted_text = decoder.decode(predicted)
+        print(f" [INFO] {len(predicted)} predictions decoded in {(time.time() - start)/1000} sec. ")
+        print(" [INFO] Example pairs (predicted, true): \n", list(zip(predicted_text[:10], true_text[:10])))
 
         edit_distance_score = edit_distance(predicted_text, true_text)
         normalized_edit_distance_score = normalized_edit_distance(predicted_text, true_text)

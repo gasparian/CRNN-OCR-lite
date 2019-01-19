@@ -65,6 +65,11 @@ python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDIC
 docker build -t crnn_ocr:latest -f Dockerfile .
 nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data -v /data/OCR/data:/save_path -p 8000:8000 crnn_ocr
 
+____________
+
+Mjsynth LSTM
+____________
+
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
 --val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL --nbepochs 1 \
 --norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --early_stopping 5000
@@ -73,6 +78,10 @@ python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDIC
 --val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL_2 --nbepochs 1 \
 --norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --early_stopping 20 \
 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL/checkpoint_weights.h5
+
+____________
+
+Result:
 
 ____________
 
@@ -90,12 +99,24 @@ python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDIC
 
 ____________
 
+Result:
+
+
+
+
+____________
+
 IAM LSTM:
 ____________
 
 python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
 --model_name OCR_IAM_ver1 --nbepochs 150 --norm --fill 255 --opt adam --time_dense_size 128 --lr .0001 \
 --batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5
+
+____________
+
+Result:
+
 ____________
 
 IAM GRU:
@@ -104,6 +125,13 @@ ____________
 python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
 --model_name OCR_IAM_ver1 --nbepochs 150 --norm --fill 255 --opt adam --time_dense_size 128 --lr .0001 \
 --batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5 --GRU
+
+____________
+
+Result:
+
+
+###############################################################################################################################
 
 ##########
 # TO DO: #
@@ -116,8 +144,8 @@ python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --tra
 # IN PROGRESS: #
 ################
 
- - correct normalization addition;
  - retrain all with LSTM and GRU;
+ - correct prediction on images in the wild
 
 """
 
@@ -181,9 +209,8 @@ if __name__ == '__main__':
     inverse_classes = {v:k for k, v in classes.items()}
     print(" [INFO] %s" % classes)
 
-    img_size = (imgh, imgW) + (1,)
     reader = Readf(
-        path, training_fname, img_size=img_size, trsh=trsh, normed=norm,
+        path, training_fname, img_size=(imgh, imgW, 1), trsh=trsh, normed=norm,
         mjsynth=mjsynth, offset=offset, fill=fill, random_state=random_state,  batch_size=batch_size, 
         length_sort_mode=length_sort_mode, classes=classes, reorder=reorder, max_train_length=max_train_length
     )
@@ -202,7 +229,7 @@ if __name__ == '__main__':
 
     print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(reader.classes)+1, reader.max_len))
 
-    init_model = CRNN(num_classes=len(classes)+1, shape=img_size, GRU=GRU,
+    init_model = CRNN(num_classes=len(classes)+1, shape=(imgh, imgW, 1), GRU=GRU,
         time_dense_size=time_dense_size, n_units=n_units, max_string_len=reader.max_len)
 
     model = init_model.get_model()

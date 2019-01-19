@@ -391,7 +391,7 @@ class Readf:
         self.reorder = reorder
         self.path = path
         self.batch_size = batch_size
-        self.img_size = (img_size[1], img_size[0], img_size[2])
+        self.img_size = img_size
         self.offset = offset
         self.fill = fill
         self.normed = normed
@@ -404,10 +404,9 @@ class Readf:
         self.prng = RandomState(random_state)
         self.prng.shuffle(self.names)
         self.classes = classes
-
         lengths = get_lengths(self.names)
-        self.mean, self.std = pickle.load(open('./data/mean_std.pickle.dat', 'rb'))
-        #self.mean, self.std = #<<<<<<<<<<<<<<<<<<<<<<<<
+        self.mean = 118.24236953981779
+        self.std = 36.72835353999682
         if not self.mjsynth:
             self.targets = pickle.load(open(self.path+'/target.pickle.dat', 'rb'))
             self.max_len = max([i.shape[0] for i in self.targets.values()])
@@ -536,7 +535,7 @@ def get_lexicon(non_intersecting_chars=False):
         return [i for i in '0123456789'+string.ascii_lowercase+'-']
 
 def norm(image, mean, std):
-    return (image.astype('float32') - mean.mean()) / std.mean() / 255. # <<<<<<<<<<<<<
+    return (image.astype('float32') - mean) / std
 
 def save_model_json(model, save_path, model_name):
     model_json = model.to_json()
