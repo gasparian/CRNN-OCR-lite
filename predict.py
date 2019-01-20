@@ -73,15 +73,21 @@ if __name__ == '__main__':
     if validate:
 
         img_size = (imgW, imgh) + (1,)
-        reader = Readf(
-            image_path, val_fname, img_size=img_size, trsh=100, normed=True, mjsynth=mjsynth, batch_size=batch_size,
-            offset=4, fill=255 if not mjsynth else -1, random_state=42, classes=classes
-        )
-        
-        fnames = np.array(reader.names)
-        if not mjsynth:
+        if mjsynth:
+            fnames = np.array(open(os.path.join(path, val_fname), "r").readlines())
+        else:
+            fnames = [os.path.join(dp, f) for dp, dn, filenames in os.walk(path)
+                     for f in filenames if re.search('png|jpeg|jpg', f)]
+            prng.shuffle(fnames)
+
             length = len(fnames)
-            fnames = fnames[int(length*0.9):]
+            fnames = fnames[int(length*.9):]
+
+        # MAX LEN ???????
+        reader = Readf(
+            img_size=img_size, normed=True, batch_size=batch_size,
+            fill=255 if not mjsynth else -1, classes=classes
+        )
 
         indeces = np.random.randint(0, len(fnames), min(num_instances, len(fnames)))
         fnames = fnames[indeces]

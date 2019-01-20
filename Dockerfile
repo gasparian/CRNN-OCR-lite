@@ -70,7 +70,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         && \
     $PIP_INSTALL \
         h5py \
-        keras==2.2.2 \
+        keras==2.2.2 \s
         && \
     $APT_INSTALL \
         libatlas-base-dev \

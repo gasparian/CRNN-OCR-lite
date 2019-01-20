@@ -49,15 +49,6 @@ https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
 
 ###############################################################################################
 
-#######################################################
-# TESTs section (from the inside of Deepo universal): #
-#######################################################
-
-python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname imlist.txt \
---save_path /data/data/OCR/data --model_name OCR_mjsynth_test_TL --nbepochs 2 \
---norm --mjsynth --opt sgd --time_dense_size 128 --lr 0.002 --batch_size 64 --max_train_length 10000 \
---pretrained_path /data/data/OCR/data/OCR_mjsynth_test/single_gpu_weights.h5
-
 ########
 # RUN: #
 ########
@@ -85,32 +76,13 @@ Result:
 
 ____________
 
-Mjsynth GRU
-____________
-
-python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
---val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL_GRU --nbepochs 1 \
---norm --mjsynth --GRU --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --early_stopping 5000
-
-python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
---val_fname annotation_test.txt --save_path /data/data/OCR/data --model_name OCR_mjsynth_FULL_GRU_2 --nbepochs 1 \
---norm --mjsynth --GRU --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --early_stopping 20 \
---pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL/checkpoint_weights.h5
-
-____________
-
-Result:
-
-
-
-
 ____________
 
 IAM LSTM:
 ____________
 
 python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
---model_name OCR_IAM_ver1 --nbepochs 150 --norm --fill 255 --opt adam --time_dense_size 128 --lr .0001 \
+--model_name OCR_IAM_ver1 --nbepochs 150 --norm --opt adam --time_dense_size 128 --lr .0001 \
 --batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5
 
 ____________
@@ -123,7 +95,7 @@ IAM GRU:
 ____________
 
 python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
---model_name OCR_IAM_ver1 --nbepochs 150 --norm --fill 255 --opt adam --time_dense_size 128 --lr .0001 \
+--model_name OCR_IAM_ver1 --nbepochs 150 --norm --opt adam --time_dense_size 128 --lr .0001 \
 --batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5 --GRU
 
 ____________
@@ -160,13 +132,8 @@ if __name__ == '__main__':
     parser.add_argument('--pretrained_path', default=None, type=str, required=False)
     parser.add_argument('--nbepochs', type=int, default=20)
     parser.add_argument('--G', type=str, default="1")
-    parser.add_argument('--trsh', type=int, default=100)
-    parser.add_argument('--fill', type=int, default=-1)
-    parser.add_argument('--offset', type=int, default=4)
     parser.add_argument('--random_state', type=int, default=42)
-    parser.add_argument('--length_sort_mode', type=str, default='target')
     parser.add_argument('--train_portion', type=float, default=0.9)
-    parser.add_argument('--max_train_length', type=int, default=None)
     parser.add_argument('--time_dense_size', type=int, default=128)
     parser.add_argument('--n_units', type=int, default=256)
     parser.add_argument('--batch_size', type=int, default=64)
@@ -176,7 +143,6 @@ if __name__ == '__main__':
     parser.add_argument('--norm', action='store_true')
     parser.add_argument('--mjsynth', action='store_true')
     parser.add_argument('--GRU', action='store_true')
-    parser.add_argument('--reorder', action='store_true')
 
     # default values set according to mjsynth dataset rules
     parser.add_argument('--imgh', type=int, default=100)
@@ -203,34 +169,42 @@ if __name__ == '__main__':
     with open(save_path+'/'+model_name+"/arguments.txt", "w") as f:
         f.write(str(args))
 
+    prng = RandomState(random_state)
+
     lexicon = get_lexicon()
 
     classes = {j:i for i, j in enumerate(lexicon)}
     inverse_classes = {v:k for k, v in classes.items()}
     print(" [INFO] %s" % classes)
 
-    reader = Readf(
-        path, training_fname, img_size=(imgh, imgW, 1), trsh=trsh, normed=norm,
-        mjsynth=mjsynth, offset=offset, fill=fill, random_state=random_state,  batch_size=batch_size, 
-        length_sort_mode=length_sort_mode, classes=classes, reorder=reorder, max_train_length=max_train_length
-    )
+    if mjsynth:
+        train = open(os.path.join(path, training_fname), "r").readlines()
+        train = [os.path.join(path, name.split()[0][2:]) for name in train]
+        prng.shuffle(train)
+        val = np.array(open(os.path.join(path, val_fname), "r").readlines())
 
-    if reorder:
-        train = np.array(list(reader.names.keys()))
     else:
-        train = np.array(reader.names)
+        train = [os.path.join(dp, f) for dp, dn, filenames in os.walk(path)
+                 for f in filenames if re.search('png|jpeg|jpg', f)]
+        prng.shuffle(train)
 
-    if val_fname:
-        val = np.array(open(path+'/'+val_fname, "r").readlines())
-    
-    if not mjsynth:
         length = len(train)
         train, val = train[:int(length*train_portion)], train[int(length*train_portion):]
+        
+    lengths = get_lengths(train)
+    max_len = max(lengths.values())
 
-    print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(reader.classes)+1, reader.max_len))
+    print(f' [INFO] {len(train)} train and {len(val)} validation images loaded ')
+
+    reader = Readf(
+        img_size=(imgh, imgW, 1), normed=norm, fill=255 if not mjsynth else -1, 
+        batch_size=batch_size, classes=classes, max_len=max_len
+    )
+
+    print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(classes)+1, max_len))
 
     init_model = CRNN(num_classes=len(classes)+1, shape=(imgh, imgW, 1), GRU=GRU,
-        time_dense_size=time_dense_size, n_units=n_units, max_string_len=reader.max_len)
+        time_dense_size=time_dense_size, n_units=n_units, max_string_len=max_len)
 
     model = init_model.get_model()
     save_model_json(model, save_path, model_name)

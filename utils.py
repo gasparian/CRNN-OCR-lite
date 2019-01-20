@@ -355,13 +355,7 @@ class DecodeCTCPred:
             results.append(text)
         return results
 
-def open_img(path, img_size, fill=-1, name="", mjsynth=False):
-    if mjsynth:
-        try:
-            name = re.sub(" ", "_", name.split()[0])[1:]
-        except:
-            name = name[1:-1]
-        name = path + name
+def open_img(name, img_size, fill=-1):
 
     img = cv2.imread(name)
     img = np.array(img, dtype=np.uint8)
@@ -379,52 +373,27 @@ def open_img(path, img_size, fill=-1, name="", mjsynth=False):
         half = np.full(((img_size[0]-img.shape[0]) // 2, img.shape[1]), fill)
         img = np.concatenate([half, img, half], axis=0)
 
+    img_thrsh = cv2.threshold(img, 100, 255, cv2.THRESH_BINARY)[1]
+    val, counts = np.unique(img_thrsh, return_counts=True)
+    if val[counts == counts.max()][0] == 255:
+        img = cv2.bitwise_not(img)
+
     img = cv2.resize(img.astype(np.uint8), (img_size[1], img_size[0]), Image.LANCZOS)
     return img, name.split("_")[-2].lower()
 
 class Readf:
 
-    def __init__(self, path, training_file=None, img_size=(40,40), trsh=100, normed=False, fill=-1, offset=5, mjsynth=False,
-                    random_state=42, length_sort_mode='target', batch_size=32, classes=None, reorder=False, max_train_length=None):
-        self.trsh = trsh
-        self.mjsynth = mjsynth
-        self.reorder = reorder
-        self.path = path
+    def __init__(self, img_size=(40,40), max_len=30, normed=False, fill=-1, batch_size=32, classes=None):
+
         self.batch_size = batch_size
         self.img_size = img_size
-        self.offset = offset
         self.fill = fill
         self.normed = normed
-        if self.mjsynth:
-            self.names = open(path+'/'+training_file, "r").readlines()[:max_train_length]
-        else:
-            self.names = [os.path.join(dp, f) for dp, dn, filenames in os.walk(path)
-                for f in filenames if re.search('png|jpeg|jpg', f)][:max_train_length]
-        self.length = len(self.names)
-        self.prng = RandomState(random_state)
-        self.prng.shuffle(self.names)
         self.classes = classes
-        lengths = get_lengths(self.names)
+        self.max_len = max_len
         self.mean = 118.24236953981779
         self.std = 36.72835353999682
-        if not self.mjsynth:
-            self.targets = pickle.load(open(self.path+'/target.pickle.dat', 'rb'))
-            self.max_len = max([i.shape[0] for i in self.targets.values()])
-        else:
-            self.max_len = max(lengths.values())
         self.blank = len(self.classes)
-
-        #reorder pictures by ascending of seq./pic length
-        if self.reorder:
-            if not self.mjsynth:
-                if length_sort_mode == 'target':
-                    self.names = OrderedDict(sorted([(k,len(self.targets[self.parse_name(k)])) for k in self.names], key=operator.itemgetter(1), reverse=False))
-                elif length_sort_mode == 'shape':
-                    self.names = OrderedDict(sorted([(k,lengths[self.parse_name(k)]) for k in self.names], key=operator.itemgetter(1), reverse=False))
-            else:
-                self.names = OrderedDict(sorted([(k,lengths[k]) for k in self.names], key=operator.itemgetter(1), reverse=False))
-
-        print(' [INFO] Reader initialized with params: %s' % ('n_images: %i; '%self.length))
 
     def make_target(self, text):
         voc = list(self.classes.keys())
@@ -438,12 +407,8 @@ class Readf:
         c = 0
         for i, name in enumerate(names):
             try:
-                img, word = open_img(self.path, self.img_size, self.fill, name, self.mjsynth)
-                if self.mjsynth:
-                    word = self.make_target(word)
-                else:
-                    word = self.parse_name(name).lower()
-                    word = self.targets[word]
+                img, word = open_img(name, self.img_size, self.fill)
+                word = self.make_target(word)
             except:
                 continue
 
@@ -466,19 +431,12 @@ class Readf:
         while True:
             for name in names:
                 try:
-                    img, word = open_img(self.path, self.img_size, self.fill, name, self.mjsynth)
+                    img, word = open_img(name, self.img_size, self.fill)
                 except:
                     continue
 
-                if self.mjsynth:
-                    source_str.append(word)
-                    word = self.make_target(word)
-
-                else:
-                    word = self.parse_name(name).lower()
-                    source_str.append(word)
-                    word = self.targets[word]
-                    img = cv2.bitwise_not(img)
+                source_str.append(word)
+                word = self.make_target(word)
 
                 Y_data[i, 0:len(word)] = word
                 label_length[i] = len(word)
@@ -521,11 +479,7 @@ class Readf:
 def get_lengths(names):
     d = {}
     for name in tqdm(names, desc="getting words lengths"):
-        try:
-            edited_name = re.sub(" ", "_", name.split()[0])[1:]
-        except:
-            edited_name = edited_name[1:-1]
-        d[name] = len(edited_name.split("_")[-2])
+        d[name] = len(name.split("_")[-2])
     return d
 
 def get_lexicon(non_intersecting_chars=False):
