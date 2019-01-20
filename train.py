@@ -109,6 +109,10 @@ Result:
 # TO DO: #
 ##########
 
+ - IDEA: create text-box detectors trained on: ICDAR, digital-born images and evaluate last model 
+   with handwritten textboxes dataset (made by me on stickies) and then train classifier to apply
+   each model on train-similar data;
+ - augment IAM dataset for small word translation inside bbox
  - make handwritten text classifier;
  - make two text box detectors: both for straight and hw text;
 
@@ -197,8 +201,8 @@ if __name__ == '__main__':
     print(f' [INFO] {len(train)} train and {len(val)} validation images loaded ')
 
     reader = Readf(
-        img_size=(imgh, imgW, 1), normed=norm, fill=255 if not mjsynth else -1, 
-        batch_size=batch_size, classes=classes, max_len=max_len
+        img_size=(imgh, imgW, 1), normed=norm, batch_size=batch_size, 
+        classes=classes, max_len=max_len, ctc=True
     )
 
     print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(classes)+1, max_len))
