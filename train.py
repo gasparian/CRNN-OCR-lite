@@ -183,9 +183,11 @@ if __name__ == '__main__':
 
     if mjsynth:
         train = open(os.path.join(path, training_fname), "r").readlines()
-        train = [os.path.join(path, name.split()[0][2:]) for name in train]
+        train = parse_mjsynth(path, train)
         prng.shuffle(train)
+
         val = np.array(open(os.path.join(path, val_fname), "r").readlines())
+        val = parse_mjsynth(path, val)
 
     else:
         train = [os.path.join(dp, f) for dp, dn, filenames in os.walk(path)

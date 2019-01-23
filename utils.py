@@ -356,7 +356,7 @@ class DecodeCTCPred:
             results.append(text)
         return results
 
-def open_img(name, img_size, ctc=True):
+def open_img(name, img_size, ctc=True, p=.7):
 
     img = cv2.imread(name)
     img = np.array(img, dtype=np.uint8)
@@ -368,11 +368,27 @@ def open_img(name, img_size, ctc=True):
     fill = val[np.where(counts == counts.max())[0][0]]
         
     if img.shape[1] < img_size[1]:
-        img = np.concatenate([img, np.full((img.shape[0], img_size[1]-img.shape[1]), fill)], axis=1)
+        delta = img_size[1]-img.shape[1]
+        r = round(np.random.uniform(0,1), 1)
+        if r <= p:
+            c = np.random.choice(list(range(2, delta-1)))
+            start = np.full((img.shape[0], c - 1), fill)
+            end = np.full((img.shape[0], delta - c), fill)
+            img = np.concatenate([start, img, end], axis=1)
+        else:
+            img = np.concatenate([img, np.full((img.shape[0], delta), fill)], axis=1)
         
     if img.shape[0] < img_size[0]:
-        half = np.full(((img_size[0]-img.shape[0]) // 2, img.shape[1]), fill)
-        img = np.concatenate([half, img, half], axis=0)
+        delta = img_size[1]-img.shape[1]
+        r = round(np.random.uniform(0,1), 1)
+        if r <= p:
+            c = np.random.choice(list(range(2, delta-1)))
+            start = np.full((img.shape[0], c - 1), fill)
+            end = np.full((img.shape[0], delta - c), fill)
+            img = np.concatenate([start, img, end], axis=0)
+        else:
+            half = np.full(((delta) // 2, img.shape[1]), fill)
+            img = np.concatenate([half, img, half], axis=0)
 
     img_thrsh = cv2.threshold(img, 255 // 2, 255, cv2.THRESH_BINARY)[1]
     val, counts = np.unique(img_thrsh, return_counts=True)
@@ -381,6 +397,9 @@ def open_img(name, img_size, ctc=True):
         
     img = cv2.resize(img, (img_size[1], img_size[0]), Image.LANCZOS)
     return img, name.split("_")[-2].lower()
+
+def parse_mjsynth(path, names):
+    return [os.path.join(path, name.split()[0][2:]) for name in names]
 
 def norm(image, mean, std):
     return (image.astype('float32') - mean) / std
@@ -404,9 +423,6 @@ class Readf:
     def make_target(self, text):
         voc = list(self.classes.keys())
         return np.array([self.classes[char] if char in voc else self.classes['-'] for char in text])
-
-    def parse_name(self, name):
-        return name.split('.')[-2].split('/')[-1]
 
     def get_labels(self, names):
         Y_data = np.full([len(names), self.max_len], self.blank)
