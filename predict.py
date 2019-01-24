@@ -83,7 +83,7 @@ if __name__ == '__main__':
             length = len(fnames)
             fnames = fnames[int(length*.9):]
 
-        reader = Readf(img_size=img_size, normed=True, ctc=True, batch_size=batch_size)
+        reader = Readf(img_size=img_size, normed=True, ctc=True, batch_size=batch_size, transform_p=0.)
 
         indeces = np.random.randint(0, len(fnames), min(num_instances, len(fnames)))
         fnames = fnames[indeces]

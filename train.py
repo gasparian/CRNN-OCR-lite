@@ -82,7 +82,7 @@ IAM LSTM:
 ____________
 
 python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
---model_name OCR_IAM_ver1 --nbepochs 150 --norm --opt adam --time_dense_size 128 --lr .0001 \
+--model_name OCR_IAM_ver1 --nbepochs 200 --norm --opt adam --time_dense_size 128 --lr .0001 \
 --batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5
 
 ____________
@@ -95,7 +95,7 @@ IAM GRU:
 ____________
 
 python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
---model_name OCR_IAM_ver1 --nbepochs 150 --norm --opt adam --time_dense_size 128 --lr .0001 \
+--model_name OCR_IAM_ver1 --nbepochs 200 --norm --opt adam --time_dense_size 128 --lr .0001 \
 --batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5 --GRU
 
 ____________
@@ -204,7 +204,7 @@ if __name__ == '__main__':
 
     reader = Readf(
         img_size=(imgh, imgW, 1), normed=norm, batch_size=batch_size, 
-        classes=classes, max_len=max_len, ctc=True
+        classes=classes, max_len=max_len, ctc=True, transform_p=0.7
     )
 
     print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(classes)+1, max_len))

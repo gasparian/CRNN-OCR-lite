@@ -407,9 +407,10 @@ def norm(image, mean, std):
 class Readf:
 
     def __init__(self, img_size=(40,40), max_len=30, normed=False, batch_size=32, classes={}, 
-                 ctc=True, mean=118.24236953981779, std=36.72835353999682):
+                 ctc=True, mean=118.24236953981779, std=36.72835353999682, transform_p=0.7):
 
         self.batch_size = batch_size
+        self.transform_p = transform_p
         self.img_size = img_size
         self.ctc = ctc
         self.normed = normed
@@ -429,7 +430,7 @@ class Readf:
         c = 0
         for i, name in enumerate(names):
             try:
-                img, word = open_img(name, self.img_size, self.ctc)
+                img, word = open_img(name, self.img_size, self.ctc, p=self.transform_p)
                 word = self.make_target(word)
             except:
                 continue
@@ -462,7 +463,7 @@ class Readf:
         while True:
             for name in names:
                 try:
-                    img, word = open_img(name, self.img_size, self.ctc)
+                    img, word = open_img(name, self.img_size, self.ctc, p=self.transform_p)
                 except:
                     continue
 
