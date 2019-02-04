@@ -35,6 +35,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_instances', type=int, default=1000)
     parser.add_argument('--G', type=int, default=-1)
     parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--random_state', type=int, default=42)
     parser.add_argument('--validate', action='store_true')
     parser.add_argument('--mjsynth', action='store_true')
 
@@ -63,7 +64,7 @@ if __name__ == '__main__':
     from utils import init_predictor, DecodeCTCPred, Readf, edit_distance, normalized_edit_distance, \
                         BilinearInterpolation, get_lexicon, load_custom_model, open_img, norm
 
-
+    prng = RandomState(random_state)
     model = load_custom_model(model_path, model_name='/model.json', weights="/final_weights.h5")
     model = init_predictor(model)
     classes = {j:i for i, j in enumerate(get_lexicon())}
