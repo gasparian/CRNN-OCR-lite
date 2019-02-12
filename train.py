@@ -257,7 +257,7 @@ if __name__ == '__main__':
 
     pickle.dump(H.history, open(save_path+'/'+model_name+'/loss_history.pickle.dat', 'wb'))
 
-    print(" [INFO] Training finished in %i sec.!" % (time.time() - start_time))
+    print(" [INFO] Training finished in %i sec.!" % (round(time.time() - start_time, 2)))
 
     model.save_weights(save_path+'/'+model_name+"/final_weights.h5")
     model.save(save_path+'/'+model_name+"/final_model.h5")

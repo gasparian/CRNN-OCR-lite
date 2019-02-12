@@ -72,7 +72,7 @@ if __name__ == '__main__':
     from keras.models import model_from_json, load_model
     
     from utils import init_predictor, DecodeCTCPred, Readf, edit_distance, normalized_edit_distance, \
-                        BilinearInterpolation, get_lexicon, load_custom_model, open_img, norm
+                        BilinearInterpolation, get_lexicon, load_custom_model, open_img, norm, parse_mjsynth
 
     prng = RandomState(random_state)
     model = load_custom_model(model_path, model_name='/model.json', weights="/final_weights.h5")
@@ -86,7 +86,8 @@ if __name__ == '__main__':
 
     if validate:
         if mjsynth:
-            fnames = np.array(open(os.path.join(image_path, val_fname), "r").readlines())
+            fnames = open(os.path.join(image_path, val_fname), "r").readlines()
+            fnames = np.array(parse_mjsynth(image_path, fnames))
         else:
             fnames = np.array([os.path.join(dp, f) for dp, dn, filenames in os.walk(image_path)
                                  for f in filenames if re.search('png|jpeg|jpg', f)])
@@ -105,8 +106,7 @@ if __name__ == '__main__':
 
     reader = Readf(img_size=img_size, normed=True, ctc=True, batch_size=batch_size, 
         transform_p=0., classes=classes, max_len=max_len)
-    if validate:
-        y_true = reader.get_labels(fnames)
+    y_true = reader.get_labels(fnames)
 
     steps = len(fnames) // batch_size
     if (len(fnames) % batch_size) > 0:
@@ -114,12 +114,12 @@ if __name__ == '__main__':
 
     print(" [INFO] Computing edit distance metric... ")
     start = time.time()
-    predicted = model.predict_generator(reader.run_generator(fnames, downsample_factor=2, test_mode=True), steps=steps)
-    print(f" [INFO] {len(fnames)} images processed in {(time.time() - start)/1000} sec. ")
+    predicted = model.predict_generator(reader.run_generator(fnames, downsample_factor=2), steps=steps)
+    print(f" [INFO] {len(fnames)} images processed in {round(time.time() - start, 2)} sec. ")
 
     start = time.time()
     predicted_text = decoder.decode(predicted)
-    print(f" [INFO] {len(predicted)} predictions decoded in {(time.time() - start)/1000} sec. ")
+    print(f" [INFO] {len(predicted)} predictions decoded in {round(time.time() - start, 2)} sec. ")
 
     if result_path is not None:
         out = pd.DataFrame({"fname":fnames, "prediction":predicted_text})
@@ -129,8 +129,10 @@ if __name__ == '__main__':
         print(" [INFO] Result store in: ", out_name)
 
     if validate:
+        start = time.time()
         true_text = [decoder.labels_to_text(y_true[i]) for i in range(len(y_true))]
         print(" [INFO] Example pairs (predicted, true): \n", list(zip(predicted_text[:10], true_text[:10])))
         edit_distance_score = edit_distance(predicted_text, true_text)
         normalized_edit_distance_score = normalized_edit_distance(predicted_text, true_text)
+        print(f" [INFO] edit distances calculated in {round(time.time() - start, 2)} sec. ")
         print(" [INFO] mean edit distance: %f ; normalized edit distance score: %f" % (edit_distance_score, normalized_edit_distance_score))

@@ -368,24 +368,24 @@ def open_img(name, img_size, ctc=True, p=.7):
     fill = val[np.where(counts == counts.max())[0][0]]
         
     # randomly with probability of "p", move word inside the bbox
-    if img.shape[1] < img_size[1]:
+    if (img_size[1] - img.shape[1]) > 2 :
         delta = img_size[1]-img.shape[1]
         r = round(np.random.uniform(0,1), 1)
-        if r <= p:
-            c = np.random.choice(list(range(2, delta-1)))
+        if r < p and p > 0.:
+            c = np.random.choice(list(range(2, delta)))
             start = np.full((img.shape[0], c - 1), fill)
             end = np.full((img.shape[0], delta - c), fill)
             img = np.concatenate([start, img, end], axis=1)
         else:
             img = np.concatenate([img, np.full((img.shape[0], delta), fill)], axis=1)
         
-    if img.shape[0] < img_size[0]:
-        delta = img_size[1]-img.shape[1]
+    if (img_size[0] - img.shape[0]) > 2 :
+        delta = img_size[0]-img.shape[0]
         r = round(np.random.uniform(0,1), 1)
-        if r <= p:
-            c = np.random.choice(list(range(2, delta-1)))
-            start = np.full((img.shape[0], c - 1), fill)
-            end = np.full((img.shape[0], delta - c), fill)
+        if r <= p and p > 0.: 
+            c = np.random.choice(list(range(2, delta)))
+            start = np.full((c - 1, img.shape[1]), fill)
+            end = np.full((delta - c, img.shape[1]), fill)
             img = np.concatenate([start, img, end], axis=0)
         else:
             half = np.full(((delta) // 2, img.shape[1]), fill)
@@ -429,11 +429,8 @@ class Readf:
     def get_labels(self, names):
         Y_data = np.full([len(names), self.max_len], self.blank)
         for i, name in enumerate(names):
-            try:
-                img, word = open_img(name, self.img_size, self.ctc, p=self.transform_p)
-                word = self.make_target(word)
-            except:
-                continue
+            img, word = open_img(name, self.img_size, self.ctc, p=self.transform_p)
+            word = self.make_target(word)
             Y_data[i, 0:len(word)] = word
         return Y_data
 
@@ -447,7 +444,7 @@ class Readf:
             return X_data, Y_data, input_length, label_length
         return X_data, np.empty((self.batch_size, self.classes))
 
-    def run_generator(self, names, downsample_factor=2, y=None, test_mode=False):
+    def run_generator(self, names, downsample_factor=2, y=None):
         i, n = 0, 0
         N = len(names) // self.batch_size
         if y is None:
@@ -460,14 +457,7 @@ class Readf:
             
         while True:
             for name in names:
-                try:
-                    img, word = open_img(name, self.img_size, self.ctc, p=self.transform_p)
-                except:
-                    if test_mode:
-                        img, word = np.zeros(self.img_size[:-1]), "-"
-                    else:
-                        continue
-
+                img, word = open_img(name, self.img_size, self.ctc, p=self.transform_p)
                 if self.ctc:
                     source_str.append(word)
                     word = self.make_target(word)
