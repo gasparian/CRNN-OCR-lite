@@ -367,6 +367,7 @@ def open_img(name, img_size, ctc=True, p=.7):
     val, counts = np.unique(img, return_counts=True)
     fill = val[np.where(counts == counts.max())[0][0]]
         
+    # randomly with probability of "p", move word inside the bbox
     if img.shape[1] < img_size[1]:
         delta = img_size[1]-img.shape[1]
         r = round(np.random.uniform(0,1), 1)
@@ -427,16 +428,13 @@ class Readf:
 
     def get_labels(self, names):
         Y_data = np.full([len(names), self.max_len], self.blank)
-        c = 0
         for i, name in enumerate(names):
             try:
                 img, word = open_img(name, self.img_size, self.ctc, p=self.transform_p)
                 word = self.make_target(word)
             except:
                 continue
-
             Y_data[i, 0:len(word)] = word
-            c += 1
         return Y_data
 
     def get_blank_matrices(self):
@@ -449,7 +447,7 @@ class Readf:
             return X_data, Y_data, input_length, label_length
         return X_data, np.empty((self.batch_size, self.classes))
 
-    def run_generator(self, names, downsample_factor=1, y=None):
+    def run_generator(self, names, downsample_factor=2, y=None, test_mode=False):
         i, n = 0, 0
         N = len(names) // self.batch_size
         if y is None:
@@ -465,7 +463,10 @@ class Readf:
                 try:
                     img, word = open_img(name, self.img_size, self.ctc, p=self.transform_p)
                 except:
-                    continue
+                    if test_mode:
+                        img, word = np.zeros(self.img_size[:-1]), "-"
+                    else:
+                        continue
 
                 if self.ctc:
                     source_str.append(word)
