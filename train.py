@@ -27,25 +27,10 @@ CTC:
 https://distill.pub/2017/ctc/
 https://towardsdatascience.com/intuitively-understanding-connectionist-temporal-classification-3797e43a86c
 
-Sliced RNN:
-https://github.com/zepingyu0512/srnn/blob/master/SRNN.py
-
-Attention block:
-https://github.com/philipperemy/keras-attention-mechanism.git
-
 Spatial transformer network:
 https://github.com/oarriaga/STN.keras
 https://arxiv.org/pdf/1506.02025.pdf
 https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
-
-
-###############################################################################################
-#                                          LOGS:                                              #
-###############################################################################################
-
- - casual convs: 8857k params; 16 epochs, 500k training examples: ctc_loss - ~0.91
- - depthwise separable convs and dropouts: 2785k params; 20 epochs, 500k training 
-   examples; 3181s; 429ms/step; 63592 s.; ctc_loss: ~0.85
 
 ###############################################################################################
 
@@ -54,11 +39,13 @@ https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
 ########
 
 docker build -t crnn_ocr:latest -f Dockerfile .
-nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data -v /data/OCR/data:/save_path -p 8000:8000 crnn_ocr
+nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data \
+                           -v /data/OCR/data:/save_path \
+                           -p 8000:8000 crnn_ocr:latest
 
 ____________
 
-Mjsynth LSTM
+Mjsynth
 ____________
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
@@ -72,56 +59,12 @@ python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDIC
 
 ____________
 
-Result:
-
-____________
-
-____________
-
-IAM LSTM:
+IAM
 ____________
 
 python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
 --model_name OCR_IAM_ver1 --nbepochs 200 --norm --opt adam --time_dense_size 128 --lr .0001 \
 --batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5
-
-____________
-
-Result:
-
-____________
-
-IAM GRU:
-____________
-
-python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
---model_name OCR_IAM_ver1 --nbepochs 200 --norm --opt adam --time_dense_size 128 --lr .0001 \
---batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5 --GRU
-
-____________
-
-Result:
-
-
-###############################################################################################################################
-
-##########
-# TO DO: #
-##########
-
- - IDEA: create text-box detectors trained on: ICDAR, digital-born images and evaluate last model 
-   with handwritten textboxes dataset (made by me on stickies) and then train classifier to apply
-   each model on train-similar data;
- - augment IAM dataset for small word translation inside bbox
- - make handwritten text classifier;
- - make two text box detectors: both for straight and hw text;
-
-################
-# IN PROGRESS: #
-################
-
- - retrain all with LSTM and GRU;
- - correct prediction on images in the wild
 
 """
 
