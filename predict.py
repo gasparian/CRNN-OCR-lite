@@ -27,11 +27,23 @@ python3 predict.py --G 0 --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver
 --image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
 --validate --num_instances 128
 
-Predict IAM and save results:
+Predict IAM-like data and save results:
 
 python3 predict.py --G 0 --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
 --image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
 --num_instances 128 --result_path /tmp
+
+_______________________________________________________________________________________
+
+~100 ms total with GPU
+~160 ms total with CPUs
+
+.09 12 128
+.1 27 256
+.13 70 512 (.58/.07)
+.19 193 1000 (.68/.08)
+.3 609 2000 (.71/.08)
+.52 2100 4000 (.73/.09)
 
 """
 
@@ -60,9 +72,12 @@ if __name__ == '__main__':
         from tensorflow import ConfigProto, Session
         from keras import backend as K
 
-        device_config = ConfigProto(intra_op_parallelism_threads=4,\
-                inter_op_parallelism_threads=4, allow_soft_placement=True,\
-                device_count = {'CPU' : 1, 'GPU' : 0})
+        device_config = ConfigProto(
+            intra_op_parallelism_threads=4,\
+            inter_op_parallelism_threads=4, 
+            allow_soft_placement=True,\
+            device_count = {'CPU' : 1, 'GPU' : 0}
+        )
         session = Session(config=device_config)
         K.set_session(session)
     else:
@@ -80,7 +95,7 @@ if __name__ == '__main__':
     classes = {j:i for i, j in enumerate(get_lexicon())}
     inverse_classes = {v:k for k, v in classes.items()}
 
-    decoder = DecodeCTCPred(top_paths=1, beam_width=3, inverse_classes=inverse_classes)
+    decoder = DecodeCTCPred(top_paths=1, beam_width=10, inverse_classes=inverse_classes)
 
     img_size = (imgh, imgW) + (1,)
 
