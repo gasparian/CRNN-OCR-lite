@@ -7,7 +7,7 @@ Train a light-weight network to recognize handwritten text on images.
 I decided to use common [CRNN](https://github.com/keras-team/keras/blob/master/examples/image_ocr.py) model with [CTC-loss](https://distill.pub/2017/ctc/) and a couple augmentations:  
 - use [spatial transformer module](https://github.com/oarriaga/STN.keras) to adjust text slope;  
 - replace convolution layers in CRNN with [depthwise-separable convolutions](https://github.com/keras-team/keras-applications/blob/master/keras_applications/mobilenet.py);
-<img src="https://github.com/gasparian/CRNN_OCR_lite/blob/master/imgs/CRNN_OCR.jpg">  
+<img src="https://github.com/gasparian/CRNN_OCR_lite/blob/master/imgs/CRNN_OCR_.jpg">  
 
 The training process consists of the following steps:  
 - train model with [mjsynth](http://www.robots.ox.ac.uk/~vgg/data/text/mjsynth.tar.gz) dataset;  
