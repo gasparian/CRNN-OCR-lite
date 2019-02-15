@@ -37,6 +37,8 @@ I've tested both models with random samples of 8000 images from validation sets:
 - mjsynth-model gives predictions with **.71** mean edit distance or **.09** if we normilize it by words lengths;  
 - IAM-model gives **.35** mean edit distance or **.08** if we normilize it by words lengths.  
 
+Actually, the majority of errors comes from repeated characters in true labels.  
+
 Here are transformed images examples with transcription results:  
 
 mjsynth | IAM  
