@@ -103,10 +103,14 @@ RUN export DEBIAN_FRONTEND=noninteractive \
 RUN ldconfig && \
     apt-get clean && \
     apt-get autoremove && \
-    rm -rf /var/lib/apt/lists/* /tmp/* ~/*
+    rm -rf /var/lib/apt/lists/* /tmp/* ~/* && \
+    mkdir ~/CRNN_OCR
 
-COPY ./data /data
-COPY ./train.py /train.py
-COPY ./utils.py /utils.py
+COPY ./models/* ~/root/CRNN_OCR/models/
+COPY ./train.py ~/root/CRNN_OCR/train.py
+COPY ./utils.py ~/root/CRNN_OCR/utils.py
+COPY ./predict.py ~/root/CRNN_OCR/predict.py
+
+ENTRYPOINT ["bash"]
 
 EXPOSE 8000
