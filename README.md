@@ -70,7 +70,7 @@ python3 predict.py --G 0 --model_path %PATH_TO_MODEL% \
 --image_path %PATH_TO_IMAGES% \
 --result_path %PATH_TO_ANSWER%
 ```  
-On average, prediction on one image costs us **~100-150 ms** regardless of using GPU. And **>95%** of that time consumes beam-search on LSTM output (even with fairly low beam widths: 3...10) which computes on CPU-side.  
+On average, prediction on one text-box image costs us **~100-150 ms** regardless of using GPU. And **>95%** of that time consumes beam-search on LSTM output (even with fairly low beam widths: 3...10) which computes on CPU-side.  
 
 ## Reproducibility  
 At first, install [docker](https://docs.docker.com/install/) and [nvidia-docker](https://github.com/NVIDIA/nvidia-docker).  
