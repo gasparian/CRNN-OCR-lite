@@ -73,8 +73,16 @@ python3 predict.py --G 0 --model_path %PATH_TO_MODEL% \
 On average, prediction on one image costs us **~100-150 ms** regardless of using GPU. And **>95%** of that time consumes beam-search on LSTM output (even with fairly low beam widths: 3...10) which computes on CPU-side.  
 
 ## Reproducibility  
+Pull image from Dockerhub:
+```
+docker pull gasparjan/crnn_ocr:latest
+```
+Or build it locally:
 ```
 docker build -t crnn_ocr:latest -f Dockerfile .
+```
+Run it, mounting volumes with data and destination folders:
+```
 nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data \
                            -v /data/OCR/data:/save_path \
                            -p 8000:8000 crnn_ocr:latest
