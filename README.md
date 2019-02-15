@@ -83,8 +83,8 @@ docker build -t crnn_ocr:latest -f Dockerfile .
 ```
 Run it, mounting volumes with data and destination folders:
 ```
-nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data \
-                           -v /data/OCR/data:/save_path \
+nvidia-docker run --rm -it -v %PATH_TO_DATA%:/input_data \
+                           -v %PATH_WHERE_MODELS_WILL_BE_STORED%:/save_path \
                            -p 8000:8000 crnn_ocr:latest
 ```
 ...and run scripts in shell as usual.
