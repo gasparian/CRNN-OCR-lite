@@ -39,9 +39,9 @@ https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
 ########
 
 docker build -t crnn_ocr:latest -f Dockerfile .
-nvidia-docker run --rm -it -v /data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data \
-                           -v /data/OCR/data:/save_path \
-                           -p 8000:8000 crnn_ocr:latest
+nvidia-docker run --rm -it -v /home/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data \
+                           -v /home/data/OCR/data:/save_path \
+                           -p 8000:8000 gasparjan/crnn_ocr:latest
 
 ____________
 

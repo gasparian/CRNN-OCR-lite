@@ -70,7 +70,7 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         && \
     $PIP_INSTALL \
         h5py \
-        keras==2.2.2 \s
+        keras==2.2.2 \
         && \
     $APT_INSTALL \
         libatlas-base-dev \
@@ -104,12 +104,12 @@ RUN ldconfig && \
     apt-get clean && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/* /tmp/* ~/* && \
-    mkdir ~/CRNN_OCR
+    mkdir /root/CRNN_OCR
 
-COPY ./models/* ~/root/CRNN_OCR/models/
-COPY ./train.py ~/root/CRNN_OCR/train.py
-COPY ./utils.py ~/root/CRNN_OCR/utils.py
-COPY ./predict.py ~/root/CRNN_OCR/predict.py
+COPY ./models/* /root/CRNN_OCR/models/
+COPY ./train.py /root/CRNN_OCR/train.py
+COPY ./utils.py /root/CRNN_OCR/utils.py
+COPY ./predict.py /root/CRNN_OCR/predict.py
 
 ENTRYPOINT ["bash"]
 
