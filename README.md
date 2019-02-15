@@ -21,9 +21,13 @@ python3 train.py --G 1 --path %PATH_TO_IMAGES% --training_fname annotation_train
 --norm --mjsynth --opt adam --time_dense_size 128 --lr .0001 --batch_size 64 --early_stopping 20 \
 %PATH_TO_PRETRAINED_MODEL%/checkpoint_weights.h5
 ```
+- prepare IAM dataset:
+```
+python3 IAM_preprocessing.py -p %PATH_TO_DATA% -np %PATH_TO_PROCESSED_DATA%
+```
 - initialize new model with weights obtained in the previous step and continue training with [IAM](http://www.fki.inf.unibe.ch/databases/iam-handwriting-database) dataset:  
 ```
-python3 train.py --G 1 --path %PATH_TO_IMAGES% --train_portion 0.9 --save_path %NEW_PATH% \
+python3 train.py --G 1 --path %PATH_TO_PROCESSED_DATA% --train_portion 0.9 --save_path %NEW_PATH% \
 --model_name %OUTPUT_MODEL_NAME% --nbepochs 200 --norm --opt adam --time_dense_size 128 --lr .0001 \
 --batch_size 64 --pretrained_path %PATH_TO_PRETRAINED_MODEL%/final_weights.h5
 ```
