@@ -6,7 +6,8 @@ Train a light-weight network to solve word-level handwritten text recognition on
 ## Training  
 I decided to use common [CRNN](https://github.com/keras-team/keras/blob/master/examples/image_ocr.py) model with [CTC-loss](https://distill.pub/2017/ctc/) and a couple augmentations:  
 - use [spatial transformer module](https://github.com/oarriaga/STN.keras) to adjust text slope;  
-- replace convolution layers in CRNN with [depthwise-separable convolutions](https://github.com/keras-team/keras-applications/blob/master/keras_applications/mobilenet.py);
+- replace convolution layers in CRNN with [depthwise-separable convolutions](https://github.com/keras-team/keras-applications/blob/master/keras_applications/mobilenet.py);  
+- use transfer learning: train OCR model on large synthetic dataset and then tune it's weights with "real" handwritten-text data.  
 <img src="https://github.com/gasparian/CRNN_OCR_lite/blob/master/imgs/CRNN_OCR_.jpg">  
 
 The training process consists of the following steps:  
