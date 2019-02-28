@@ -6,7 +6,6 @@ import pickle
 import time
 
 from tqdm import tqdm
-from imageio import imsave
 from scipy import misc
 import numpy as np
 import pandas as pd
@@ -17,21 +16,31 @@ import cv2
 """
 Check mjsynth:
 
-python3 predict.py --G 0 --model_path /data/data/CRNN_OCR_keras/data/OCR_mjsynth_FULL_2 \
---image_path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px \
---val_fname annotation_test.txt --mjsynth --validate --num_instances 128
+python3 predict.py --G 0 \
+                   --model_path /data/data/CRNN_OCR_keras/data/OCR_mjsynth_FULL_2 \
+                   --image_path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px \
+                   --val_fname annotation_test.txt --mjsynth --validate --num_instances 128
 
 Check IAM:
 
-python3 predict.py --G 0 --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
---image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
---validate --num_instances 128
+python3 predict.py --G 0 \
+                   --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
+                   --image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
+                   --validate --num_instances 128
 
 Predict IAM-like data and save results:
 
-python3 predict.py --G 0 --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
---image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
---num_instances 128 --result_path /tmp
+python3 predict.py --G 0 \
+                   --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
+                   --image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
+                   --num_instances 128 --result_path /tmp
+
+python3 predict.py --G 0 \
+                   --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
+                   --image_path /data/data/CRNN_OCR_keras/data/img \
+                   --boxes /data/data/CRNN_OCR_keras/data/flipchart_words.pickle.dat \
+                   --result_path /data/data/CRNN_OCR_keras/data \
+                   --validate
 
 _______________________________________________________________________________________
 
@@ -46,6 +55,7 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', type=str, required=True)
     parser.add_argument('--image_path', type=str, required=True)
     parser.add_argument('--result_path', type=str, required=False, default=None)
+    parser.add_argument('--boxes', type=str, required=False, default=None)
     parser.add_argument('--val_fname', type=str, required=False, default=None)
     parser.add_argument('--num_instances', type=int, default=None)
     parser.add_argument('--G', type=int, default=-1)
@@ -112,24 +122,50 @@ if __name__ == '__main__':
         indeces = np.random.randint(0, len(fnames), min(num_instances, len(fnames)))
         fnames = fnames[indeces]
 
-    reader = Readf(img_size=img_size, normed=True, ctc=True, batch_size=batch_size, 
+    reader = Readf(img_size=img_size, normed=True, batch_size=batch_size, 
         transform_p=0., classes=classes, max_len=max_len)
-    y_true = reader.get_labels(fnames)
+    length = len(fnames)
 
-    steps = len(fnames) // batch_size
-    if (len(fnames) % batch_size) > 0:
+    bboxs = {}
+    if boxes is not None:
+        # get predictions from one image with detected boxes of text
+
+        # open bboxes preprocessed file
+        # data struct.: (word/None, x_0, y_0, x_1, y_1)
+        bboxs = pickle.load(open(boxes, "rb"))
+
+        # choose half of images to save time
+        # and make full paths to images with boxes 
+        # comment this line in "real life"
+        part_dict = len(bboxs) // 2
+
+        bboxs = {os.path.join(image_path, it[0]):it[1] for i, it in enumerate(bboxs.items()) if i <= part_dict}
+        length = sum([len(v) for v in bboxs.values()])
+        fnames = list(bboxs.keys())
+        if validate:
+            true_text = [el[0] for i, v in enumerate(bboxs.values()) 
+                               for el in v if i <= part_dict]
+            y_true = np.array([reader.make_target(el) for el in true_text])
+    else:
+        y_true = reader.get_labels(fnames)
+
+    steps = length // batch_size
+    if (length % batch_size) > 0:
         steps += 1
 
-    print(" [INFO] Computing edit distance metric... ")
+    print(" [INFO] Predicting... ")
     start = time.time()
-    predicted = model.predict_generator(reader.run_generator(fnames, downsample_factor=2), steps=steps)
+    predicted = model.predict_generator(reader.run_generator(fnames, bboxs=bboxs, downsample_factor=2), steps=steps)
     print(f" [INFO] {len(fnames)} images processed in {round(time.time() - start, 2)} sec. ")
 
     start = time.time()
     predicted_text = decoder.decode(predicted)
+    predicted_text = predicted_text[:length]
     print(f" [INFO] {len(predicted)} predictions decoded in {round(time.time() - start, 2)} sec. ")
 
     if result_path is not None:
+        if len(fnames) != len(predicted_text):
+            fnames = [fname for fname in bboxs for j in range(len(bboxs[fname]))]
         out = pd.DataFrame({"fname":fnames, "prediction":predicted_text})
         out_name = os.path.join(result_path, "prediction.csv")
         out.to_csv(out_name)
@@ -137,6 +173,7 @@ if __name__ == '__main__':
         print(" [INFO] Result store in: ", out_name)
 
     if validate:
+        print(" [INFO] Computing edit distance metric... ")
         start = time.time()
         true_text = [decoder.labels_to_text(y_true[i]) for i in range(len(y_true))]
         print(" [INFO] Example pairs (predicted, true): \n", list(zip(predicted_text[:10], true_text[:10])))

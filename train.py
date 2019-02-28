@@ -43,6 +43,9 @@ nvidia-docker run --rm -it -v /home/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDIC
                            -v /home/data/OCR/data:/save_path \
                            -p 8000:8000 gasparjan/crnn_ocr:latest
 
+nvidia-docker run --rm -it -v /home:/data \
+                           -p 8004:8000 gasparjan/crnn_ocr:latest
+
 ____________
 
 Mjsynth
@@ -147,7 +150,7 @@ if __name__ == '__main__':
 
     reader = Readf(
         img_size=(imgh, imgW, 1), normed=norm, batch_size=batch_size, 
-        classes=classes, max_len=max_len, ctc=True, transform_p=0.7
+        classes=classes, max_len=max_len, transform_p=0.7
     )
 
     print(" [INFO] Number of classes: {}; Max. string length: {} ".format(len(classes)+1, max_len))

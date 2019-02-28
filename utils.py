@@ -356,13 +356,18 @@ class DecodeCTCPred:
             results.append(text)
         return results
 
-def open_img(name, img_size, ctc=True, p=.7):
-
+def read_img(name):
     img = cv2.imread(name)
     img = np.array(img, dtype=np.uint8)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    if ctc:
-        img = img[::-1].T
+    return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+def open_img(img, img_size, p=.7):
+
+    if isinstance(img, str):
+        name = img
+        img = read_img(name)
+
+    img = img[::-1].T
 
     val, counts = np.unique(img, return_counts=True)
     fill = val[np.where(counts == counts.max())[0][0]]
@@ -397,7 +402,9 @@ def open_img(name, img_size, ctc=True, p=.7):
         img = cv2.bitwise_not(img)
         
     img = cv2.resize(img, (img_size[1], img_size[0]), Image.LANCZOS)
-    return img, name.split("_")[-2].lower()
+    if 'name' in locals():
+        return img, name.split("_")[-2].lower()
+    return img
 
 def parse_mjsynth(path, names):
     return [os.path.join(path, name.split()[0][2:]) for name in names]
@@ -408,28 +415,27 @@ def norm(image, mean, std):
 class Readf:
 
     def __init__(self, img_size=(40,40), max_len=30, normed=False, batch_size=32, classes={}, 
-                 ctc=True, mean=118.24236953981779, std=36.72835353999682, transform_p=0.7):
+                 mean=118.24236953981779, std=36.72835353999682, transform_p=0.7):
 
         self.batch_size = batch_size
         self.transform_p = transform_p
         self.img_size = img_size
-        self.ctc = ctc
         self.normed = normed
         self.classes = classes
         self.max_len = max_len
         self.mean = mean
         self.std = std
+        self.voc = list(self.classes.keys())
         if type(classes) == dict:
             self.blank = len(self.classes)
 
     def make_target(self, text):
-        voc = list(self.classes.keys())
-        return np.array([self.classes[char] if char in voc else self.classes['-'] for char in text])
+        return np.array([self.classes[char] if char in self.voc else self.classes['-'] for char in text])
 
     def get_labels(self, names):
         Y_data = np.full([len(names), self.max_len], self.blank)
         for i, name in enumerate(names):
-            img, word = open_img(name, self.img_size, self.ctc, p=self.transform_p)
+            img, word = open_img(name, self.img_size, p=self.transform_p)
             word = self.make_target(word)
             Y_data[i, 0:len(word)] = word
         return Y_data
@@ -437,45 +443,52 @@ class Readf:
     def get_blank_matrices(self):
         shape = (self.batch_size,)+self.img_size
         X_data = np.empty(shape)
-        if self.ctc:
-            Y_data = np.full([self.batch_size, self.max_len], self.blank)
-            input_length = np.ones((self.batch_size, 1))
-            label_length = np.zeros((self.batch_size, 1))
-            return X_data, Y_data, input_length, label_length
-        return X_data, np.empty((self.batch_size, self.classes))
+        Y_data = np.full([self.batch_size, self.max_len], self.blank)
+        input_length = np.ones((self.batch_size, 1))
+        label_length = np.zeros((self.batch_size, 1))
+        return X_data, Y_data, input_length, label_length
 
-    def run_generator(self, names, downsample_factor=2, y=None):
-        i, n = 0, 0
-        N = len(names) // self.batch_size
-        if y is None:
-            y = np.zeros(self.batch_size)
-        if self.ctc:
-            source_str = []
-            X_data, Y_data, input_length, label_length = self.get_blank_matrices()
+    def run_generator(self, names, downsample_factor=2, bboxs={}):
+
+        if bboxs:
+            n_instances = sum([len(v) for v in bboxs.values()])
         else:
-            X_data, Y_data = self.get_blank_matrices()
+            bboxs = {name:[name] for name in names}
+            n_instances = len(names)
+
+        N = n_instances // self.batch_size
+        rem = n_instances % self.batch_size
+
+        i, n = 0, 0
+
+        source_str = []
+        X_data, Y_data, input_length, label_length = self.get_blank_matrices()
             
         while True:
             for name in names:
-                img, word = open_img(name, self.img_size, self.ctc, p=self.transform_p)
-                if self.ctc:
+                if bboxs[name][0] == name:
+                    _img, word = open_img(name, self.img_size, p=self.transform_p)
+                else:
+                    img = read_img(name)
+
+                for bbox in bboxs[name]:
+                    if bbox  != name:
+                        _img = open_img(img[bbox[1]:bbox[3], bbox[2]:bbox[4]], 
+                                        self.img_size, p=self.transform_p)
+                        word = bbox[0] if bbox[0] is not None else "-"
+
                     source_str.append(word)
                     word = self.make_target(word)
                     Y_data[i, 0:len(word)] = word
                     label_length[i] = len(word)
                     input_length[i] = (self.img_size[0]+4) // downsample_factor - 2
-                else:
-                    Y_data[i] = y[i]
 
-                if self.normed:
-                    img = norm(img, self.mean, self.std)
+                    if self.normed:
+                        _img = norm(_img, self.mean, self.std)
 
-                img = img[:,:,np.newaxis]
-
-                X_data[i] = img
-                i += 1
-
-                if self.ctc:
+                    X_data[i] = _img[:,:,np.newaxis]
+                    
+                    i += 1
                     inputs = {
                         'the_input': X_data,
                         'the_labels': Y_data,
@@ -484,21 +497,15 @@ class Readf:
                         'source_str': np.array(source_str)
                     }
                     outputs = {'ctc': np.zeros([self.batch_size])}
-                else:
-                    inputs = X_data
-                    outputs = Y_data
 
-                if n == N and i == (len(names) % self.batch_size):
-                    yield (inputs, outputs)
+                    if n == N and i == rem:
+                        yield (inputs, outputs)
 
-                elif i == self.batch_size:
-                    n += 1; i = 0
-                    if self.ctc:
+                    elif i == self.batch_size:
+                        n += 1; i = 0
                         source_str = []
                         X_data, Y_data, input_length, label_length = self.get_blank_matrices()
-                    else:
-                        X_data, Y_data = self.get_blank_matrices()
-                    yield (inputs, outputs)
+                        yield (inputs, outputs)
                     
 def make_ohe(y, nclasses):
     ohe = np.zeros((len(y), nclasses))
