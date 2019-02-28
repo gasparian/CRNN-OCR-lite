@@ -371,6 +371,9 @@ def open_img(img, img_size, p=.7):
 
     val, counts = np.unique(img, return_counts=True)
     fill = val[np.where(counts == counts.max())[0][0]]
+
+    if all([img.shape[0] <= img_size[0] // 2, img.shape[1] <= img_size[1] // 2]):
+        img = cv2.resize(img, (int(img.shape[1] * 1.5), int(img.shape[0] * 1.5)), Image.LANCZOS)
         
     # randomly with probability of "p", move word inside the bbox
     if (img_size[1] - img.shape[1]) > 2 :
@@ -404,7 +407,7 @@ def open_img(img, img_size, p=.7):
     img = cv2.resize(img, (img_size[1], img_size[0]), Image.LANCZOS)
     if 'name' in locals():
         return img, name.split("_")[-2].lower()
-    return img
+    return img, False
 
 def parse_mjsynth(path, names):
     return [os.path.join(path, name.split()[0][2:]) for name in names]
@@ -473,7 +476,7 @@ class Readf:
 
                 for bbox in bboxs[name]:
                     if bbox  != name:
-                        _img = open_img(img[bbox[1]:bbox[3], bbox[2]:bbox[4]], 
+                        _img, __ = open_img(img[bbox[1]:bbox[3], bbox[2]:bbox[4]], 
                                         self.img_size, p=self.transform_p)
                         word = bbox[0] if bbox[0] is not None else "-"
 
