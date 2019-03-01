@@ -83,14 +83,20 @@ Or build it locally:
 ```
 docker build -t crnn_ocr:latest -f Dockerfile .
 ```
-Run it, mounting volumes with data and destination folders:
+Run it, mounting volumes:
 ```
-nvidia-docker run --rm -it -v %PATH_TO_DATA%:/input_data \
-                           -v %PATH_WHERE_MODELS_WILL_BE_STORED%:/save_path \
-                           -p 8000:8000 gasparjan/crnn_ocr:latest
+nvidia-docker run --rm -it -v /home:/data \
+                           -p 8004:8000 gasparjan/crnn_ocr:latest
 ```
 ...and run scripts in shell as usual.
 
-## P.S.: "Ok. What can I do with all these stuff?"  
-I think these models will be really useful only with word-level detection model (which I want to make next). And the main usecase can be indexing recognized text on images in search: for example you've got bazillion photos of whiteboards / handwritten notes and etc. And you will be really bad at searching particullar photos with needed topic. So if the all photos had some text annotation - the problem disappears.  
+## What's next:  
+**The global goal is to make end-to-end pipeline for detection and recognition and make it work in real photos.**  
+
+ - [x] CRNN
+ - [ ] Text binarizing model (binary segmentation)
+ - [ ] Word-level text boxes detector  
+
+## P.S.  
+The main usecase can be indexing recognized text on images in search: for example you've got bazillion photos of whiteboards / handwritten notes and etc. And you will be really bad at searching particullar photos with needed topic. So if the all photos had some text annotation - the problem disappears.  
 Why do I think so? Clearly, it's super-hard to get 0% error rate on real-world photos. So if you want to use "hand-made" detection+recognition pipeline to "digitize" text on photos, in the end, you'll most likely need to check and correct all recognized words or add non-recognized ones. This is pretty same expirience to the current "pdf-scanners" (which is painful). And on the other side, if the model can detect and recognize even 20% of words on image, you can still find something using text search.  
