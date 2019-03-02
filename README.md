@@ -93,7 +93,9 @@ nvidia-docker run --rm -it -v /home:/data \
 ## What's next:  
 **The global goal is to make end-to-end pipeline for robust detection and recognition.**  
 
- - [x] CRNN
+ - [x] CRNN trained on mjsynth; 
+ - [x] CRNN trained on IAM; 
+ - [ ] CRNN trained on hand-written text "from the wild"; 
  - [ ] Text binarizing model (binary segmentation)
  - [ ] Word-level text boxes detector  
 
