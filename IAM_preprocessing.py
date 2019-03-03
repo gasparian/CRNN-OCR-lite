@@ -46,7 +46,7 @@ if __name__ == "__main__":
                 text = word.attrib['text'].lower()
                 text = re.sub("\W+|_", " ", text)
                 text = re.sub("\s+", "-", text)
-                if counters[0] <= len(text) <= counters[1]:
+                if counters[0] <= len(re.sub("-", "", text)) <= counters[1]:
                     img_name = word.attrib['id'].split('-')
                     img_name = img_name[0]+'/'+'-'.join(img_name[:2])+'/'+'-'.join(img_name)+'.png'
 
