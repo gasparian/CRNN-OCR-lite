@@ -40,7 +40,7 @@ I use the lowest-loss model checkpoint.
 
 I've tested both models with random samples of 8000 images from validation sets:  
 - mjsynth-model gives predictions with **.71** mean edit distance or **.09** if we normilize it by words lengths;  
-- IAM-model gives **.35** mean edit distance or **.08** if we normilize it by words lengths.  
+- IAM-model gives **.35** mean edit distance or **.08** if we normalize it by words lengths.  
 
 Actually, the majority of errors comes from repeated characters in true labels.  
 
@@ -95,7 +95,12 @@ nvidia-docker run --rm -it -v /home:/data \
 
  - [x] CRNN trained on mjsynth; 
  - [x] CRNN trained on IAM; 
- - [ ] CRNN trained on hand-written text "from the wild"; 
+ - [x] CRNN trained on hand-written text "from the wild"; 
+ 
+     - with the help of recently available [azure ocr api](https://azure.microsoft.com/en-us/services/cognitive-services/computer-vision/) (check out `azure_ocr.py`) I've labeled a small dataset (148 large images) of flipcharts / whiteboards photos with a lot of handwritten text;  
+     - dataset contains ~12k tokens for training and ~2k for validation. [Here is a model](https://github.com/gasparian/CRNN_OCR_lite/tree/master/models/OCR_Stickies_ver1);  
+     - the results are not so convincing: **~1.6** mean edit distance and **~.3** normalized distance. To improve the recognition quality, it makes sense to apply augmentations on images / expand dataset.  
+     
  - [ ] Text binarizing model (binary segmentation)
  - [ ] Word-level text boxes detector  
 
