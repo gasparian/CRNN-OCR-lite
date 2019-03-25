@@ -92,9 +92,9 @@ nvidia-docker run --rm -it -v /home:/data \
 
 **The global goal is to make end-to-end pipeline for robust detection and recognition.**  
 
- - [x] CRNN trained on mjsynth; 
- - [x] CRNN trained on IAM; 
- - [x] CRNN trained on hand-written text "from the wild"; 
+ - [x] CRNN trained on mjsynth. Training from scratch; 
+ - [x] CRNN trained on IAM. Initial weights - from model trained on mjsynth; 
+ - [x] CRNN trained on hand-written text "from the wild". Initial weights - from model trained on mjsynth & IAM; 
  
      - with the help of recently available [azure ocr api](https://azure.microsoft.com/en-us/services/cognitive-services/computer-vision/) (check out `azure_ocr.py`) I've labeled a small dataset (148 large images) of flipcharts / whiteboards photos with a lot of handwritten text;  
      - dataset contains ~12k tokens for training and ~2k for validation. [Here is a model](https://github.com/gasparian/CRNN_OCR_lite/tree/master/models/OCR_Stickies_ver1);  
