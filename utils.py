@@ -406,7 +406,7 @@ def open_img(img, img_size, p=.7):
         
     img = cv2.resize(img, (img_size[1], img_size[0]), Image.LANCZOS)
     if 'name' in locals():
-        return img, name.split("_")[-2].lower()
+        return img, name.split("/")[-1].split("_")[1].lower()
     return img, False
 
 def parse_mjsynth(path, names):
@@ -475,7 +475,7 @@ class Readf:
                     img = read_img(name)
 
                 for bbox in bboxs[name]:
-                    if bbox  != name:
+                    if bbox != name:
                         _img, __ = open_img(img[bbox[1]:bbox[3], bbox[2]:bbox[4]], 
                                         self.img_size, p=self.transform_p)
                         word = bbox[0] if bbox[0] is not None else "-"
@@ -518,7 +518,7 @@ def make_ohe(y, nclasses):
 def get_lengths(names):
     d = {}
     for name in tqdm(names, desc="getting words lengths"):
-        d[name] = len(name.split("_")[-2])
+        d[name] = len(name.split("/")[-1].split("_")[1])
     return d
 
 def get_lexicon(non_intersecting_chars=False):

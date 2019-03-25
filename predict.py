@@ -14,39 +14,46 @@ from PIL import Image
 import cv2
 
 """
+######################
 Check mjsynth:
+######################
 
 python3 predict.py --G 0 \
                    --model_path /data/data/CRNN_OCR_keras/data/OCR_mjsynth_FULL_2 \
                    --image_path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px \
-                   --val_fname annotation_test.txt --mjsynth --validate --num_instances 128
+                   --val_fname annotation_test.txt --mjsynth --validate --num_instances 128 --max_len 23
 
+######################
 Check IAM:
+######################
 
 python3 predict.py --G 0 \
                    --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
                    --image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
-                   --validate --num_instances 128
+                   --validate --num_instances 128  --max_len 23
 
 Predict IAM-like data and save results:
 
 python3 predict.py --G 0 \
                    --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
                    --image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
-                   --num_instances 128 --result_path /tmp
+                   --num_instances 128 --result_path /tmp  --max_len 23
 
 python3 predict.py --G 0 \
                    --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
                    --image_path /data/data/CRNN_OCR_keras/data/img \
                    --boxes /data/data/CRNN_OCR_keras/data/flipchart_words.pickle.dat \
                    --result_path /data/data/CRNN_OCR_keras/data \
-                   --validate
+                   --validate  --max_len 23
 
-_______________________________________________________________________________________
+######################
+Check Stickies:
+######################
 
-~100 ms total with GPU
-~160 ms total with CPUs
-
+python3 predict.py --G 0 \
+                   --model_path /data/data/CRNN_OCR_keras/data/OCR_Stickies_ver1 \
+                   --image_path /data/data/CRNN_OCR_keras/data/stickies_text \
+                   --train_portion 0.85 --num_instances 128 --validate  --max_len 20
 """
 
 if __name__ == '__main__':
@@ -55,12 +62,14 @@ if __name__ == '__main__':
     parser.add_argument('--model_path', type=str, required=True)
     parser.add_argument('--image_path', type=str, required=True)
     parser.add_argument('--result_path', type=str, required=False, default=None)
+    parser.add_argument('--max_len', type=int, required=False, default=23)
     parser.add_argument('--boxes', type=str, required=False, default=None)
     parser.add_argument('--val_fname', type=str, required=False, default=None)
     parser.add_argument('--num_instances', type=int, default=None)
     parser.add_argument('--G', type=int, default=-1)
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--random_state', type=int, default=42)
+    parser.add_argument('--train_portion', type=float, default=.9)
     parser.add_argument('--validate', action='store_true')
     parser.add_argument('--mjsynth', action='store_true')
 
@@ -111,12 +120,10 @@ if __name__ == '__main__':
                                  for f in filenames if re.search('png|jpeg|jpg', f)])
             prng.shuffle(fnames)
             length = len(fnames)
-            fnames = fnames[int(length*.9):]
+            fnames = fnames[int(length*train_portion):]
     else:
         fnames = np.array([os.path.join(dp, f) for dp, dn, filenames in os.walk(image_path)
                             for f in filenames if re.search('png|jpeg|jpg', f)])
-
-    max_len = 23 if mjsynth else 21
 
     if num_instances is not None:
         indeces = np.random.randint(0, len(fnames), min(num_instances, len(fnames)))

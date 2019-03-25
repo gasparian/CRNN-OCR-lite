@@ -1,5 +1,6 @@
 import os
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
+
 import pickle
 import glob
 import string
@@ -38,17 +39,13 @@ https://pytorch.org/tutorials/intermediate/spatial_transformer_tutorial.html
 # RUN: #
 ########
 
-docker build -t crnn_ocr:latest -f Dockerfile .
-nvidia-docker run --rm -it -v /home/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px:/input_data \
-                           -v /home/data/OCR/data:/save_path \
-                           -p 8000:8000 gasparjan/crnn_ocr:latest
-
+docker build -t gasparjan/crnn_ocr:latest -f Dockerfile .
 nvidia-docker run --rm -it -v /home:/data \
                            -p 8004:8000 gasparjan/crnn_ocr:latest
 
 ____________
 
-Mjsynth
+Mjsynth (max_len = 23)
 ____________
 
 python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDICT32px --training_fname annotation_train.txt \
@@ -62,12 +59,22 @@ python3 train.py --G 1 --path /data/data/OCR/data/mjsynth/mnt/ramdisk/max/90kDIC
 
 ____________
 
-IAM
+IAM (max_len = 21)
 ____________
 
-python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 --save_path ./data \
---model_name OCR_IAM_ver1 --nbepochs 200 --norm --opt adam --time_dense_size 128 --lr .0001 \
---batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5
+python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/IAM_processed --train_portion 0.9 \
+--save_path /data/data/CRNN_OCR_keras/data --model_name OCR_IAM_ver1 --nbepochs 200 --norm --opt adam \
+--time_dense_size 128 --lr .0001 --batch_size 64 --pretrained_path /data/data/OCR/data/OCR_mjsynth_FULL_2/final_weights.h5
+
+____________
+
+Stickies (max_len = 20)
+____________
+
+python3 train.py --G 1 --path /data/data/CRNN_OCR_keras/data/stickies_text --train_portion 0.85 \
+--save_path /data/data/CRNN_OCR_keras/data --model_name OCR_Stickies_ver1 --nbepochs 200 --norm \
+--opt adam --time_dense_size 128 --lr .0001 --batch_size 64 \
+--pretrained_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1/final_weights.h5
 
 """
 
@@ -142,7 +149,7 @@ if __name__ == '__main__':
 
         length = len(train)
         train, val = train[:int(length*train_portion)], train[int(length*train_portion):]
-        
+
     lengths = get_lengths(train)
     max_len = max(lengths.values())
 
