@@ -90,7 +90,6 @@ nvidia-docker run --rm -it -v /home:/data \
 ```
 ...and run scripts in shell as usual.
 
-## What's next:  
 **The global goal is to make end-to-end pipeline for robust detection and recognition.**  
 
  - [x] CRNN trained on mjsynth; 
