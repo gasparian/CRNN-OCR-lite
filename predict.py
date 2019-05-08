@@ -9,6 +9,7 @@ from tqdm import tqdm
 from scipy import misc
 import numpy as np
 import pandas as pd
+from keras import backend as K
 from numpy.random import RandomState
 from PIL import Image
 import cv2
@@ -80,9 +81,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
     globals().update(vars(args))
 
-    if G < 0:
+    gpus_list = K.tensorflow_backend._get_available_gpus()
+    if G < 0 or len(gpus_list) == 0:
         from tensorflow import ConfigProto, Session
-        from keras import backend as K
 
         device_config = ConfigProto(
             intra_op_parallelism_threads=4,\
