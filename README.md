@@ -88,12 +88,18 @@ Or build it locally:
 ```
 docker build -t crnn_ocr:latest -f Dockerfile .
 ```
-Run it, mounting volumes:
+Run it via `nvidia-docker`, mounting volumes:
 ```
 nvidia-docker run --rm -it -v /home:/data \
                            -p 8004:8000 gasparjan/crnn_ocr:latest
 ```
-...and run scripts in shell as usual.
+or just `docker` for CPU-only build:
+```
+docker run --rm -it -v /home:/data \
+                    -p 8004:8000 gasparjan/crnn_ocr:cpu
+```
+
+...and then run scripts in shell as usual.
 
 **The global goal is to make end-to-end pipeline for robust detection and recognition.**  
 
