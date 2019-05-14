@@ -79,6 +79,11 @@ Pull image from Dockerhub:
 ```
 docker pull gasparjan/crnn_ocr:latest
 ```
+or with CPU support only (just change tag):
+```
+docker pull gasparjan/crnn_ocr:cpu
+```
+
 Or build it locally:
 ```
 docker build -t crnn_ocr:latest -f Dockerfile .

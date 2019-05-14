@@ -31,21 +31,21 @@ Check IAM:
 python3 predict.py --G 0 \
                    --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
                    --image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
-                   --validate --num_instances 128  --max_len 23
+                   --validate --num_instances 128  --max_len 21
 
 Predict IAM-like data and save results:
 
 python3 predict.py --G 0 \
                    --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
                    --image_path /data/data/CRNN_OCR_keras/data/IAM_processed \
-                   --num_instances 128 --result_path /tmp  --max_len 23
+                   --num_instances 128 --result_path /tmp  --max_len 21
 
 python3 predict.py --G 0 \
                    --model_path /data/data/CRNN_OCR_keras/data/OCR_IAM_ver1 \
                    --image_path /data/data/CRNN_OCR_keras/data/img \
                    --boxes /data/data/CRNN_OCR_keras/data/flipchart_words.pickle.dat \
                    --result_path /data/data/CRNN_OCR_keras/data \
-                   --validate  --max_len 23
+                   --validate  --max_len 21
 
 ######################
 Check Stickies:
