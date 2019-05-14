@@ -57,19 +57,20 @@ For inference you can use `prediction.py` or create you own script using functio
 python3 predict.py --G 0 --model_path %PATH_TO_MODEL% \
 --image_path %PATH_TO_IMAGES% \
 --val_fname annotation_test.txt --mjsynth \
---validate --num_instances 512
+--validate --num_instances 512 --max_len 23
 ```  
 - IAM  
 ```
 python3 predict.py --G 0 --model_path %PATH_TO_MODEL% \
 --image_path %PATH_TO_IMAGES% \
---validate --num_instances 512
+--validate --num_instances 512 --max_len 21
 ```  
 For example, this script will make prediction on images from `%PATH_TO_IMAGES%` and save results in `%PATH_TO_ANSWER%/*.csv`:   
 ```
 python3 predict.py --G 0 --model_path %PATH_TO_MODEL% \
 --image_path %PATH_TO_IMAGES% \
---result_path %PATH_TO_ANSWER%
+--result_path %PATH_TO_ANSWER% \
+--max_len %MAX_STRING_LENGTH%
 ```  
 On average, prediction on one text-box image costs us **~100-150 ms** regardless of using GPU. And **>95%** of that time consumes beam-search on LSTM output (even with fairly low beam widths: 3...10) which computes on CPU-side.  
 
