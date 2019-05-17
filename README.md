@@ -1,8 +1,8 @@
 # CRNN_OCR_lite
+*Disclaimer: This is not a production-ready solution, this repo was created to just show an approach*
 
 ## Idea  
 Train a light-weight network to solve word-level handwritten text recognition on images.  
-
 ## Training  
 I decided to use common [CRNN](https://github.com/keras-team/keras/blob/master/examples/image_ocr.py) model with [CTC-loss](https://distill.pub/2017/ctc/) and a couple augmentations:  
 - use [spatial transformer module](https://github.com/oarriaga/STN.keras) to adjust text slope;  
