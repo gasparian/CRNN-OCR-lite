@@ -11,19 +11,14 @@ FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
 
 RUN apt-get update && apt-get install -y --allow-downgrades --allow-change-held-packages --no-install-recommends \
     libcudnn7=7.0.5.15-1+cuda9.0 \
-    libcudnn7-dev=7.0.5.15-1+cuda9.0 && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update
+    libcudnn7-dev=7.0.5.15-1+cuda9.0
 
 RUN export DEBIAN_FRONTEND=noninteractive \
     APT_INSTALL="apt-get install -y --no-install-recommends" && \
     PIP_INSTALL="python -m pip --no-cache-dir install --upgrade" && \
     GIT_CLONE="git clone --depth 10" && \
-    rm -rf /var/lib/apt/lists/* \
-           /etc/apt/sources.list.d/cuda.list \
+    rm -rf /etc/apt/sources.list.d/cuda.list \
            /etc/apt/sources.list.d/nvidia-ml.list && \
-    apt-get update  && \
     $APT_INSTALL \
         build-essential \
         ca-certificates \
@@ -32,8 +27,6 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         git \
         vim \
         unzip \
-        && \
-        $APT_INSTALL \
         software-properties-common \
         && \
     add-apt-repository ppa:deadsnakes/ppa && \
@@ -49,8 +42,6 @@ RUN export DEBIAN_FRONTEND=noninteractive \
     ln -s /usr/bin/python3.6 /usr/local/bin/python && \
     $PIP_INSTALL \
         setuptools \
-        && \
-    $PIP_INSTALL \
         numpy \
         scipy \
         pandas \
@@ -67,8 +58,6 @@ RUN export DEBIAN_FRONTEND=noninteractive \
         ./b2 install --prefix=/usr/local && \
     $PIP_INSTALL \
         tensorflow-gpu==1.8.0 \
-        && \
-    $PIP_INSTALL \
         h5py \
         keras==2.2.2 \
         && \
